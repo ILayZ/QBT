@@ -34,7 +34,7 @@ impl PerformanceMetrics {
     ) -> Self {
         let total_return = equity.last().map(|e| e / equity.first().unwrap_or(&1.0) - 1.0).unwrap_or(0.0);
         let years = equity.len() as f64 / bars_per_year;
-        let cagr = if years > 0.0 && equity.first().map(|e| e > 0.0).unwrap_or(false) {
+        let cagr = if years > 0.0 && equity.first().map(|e| *e > 0.0).unwrap_or(false) {
             (equity.last().unwrap() / equity.first().unwrap()).powf(1.0 / years) - 1.0
         } else {
             0.0
@@ -109,8 +109,8 @@ impl PerformanceMetrics {
         let avg_trade_pnl = if !trade_pnls.is_empty() { trade_pnls.iter().sum::<f64>() / trade_pnls.len() as f64 } else { 0.0 };
         let avg_win = if !wins.is_empty() { gross_profit / wins.len() as f64 } else { 0.0 };
         let avg_loss = if !losses.is_empty() { gross_loss / losses.len() as f64 } else { 0.0 };
-        let best_trade = wins.iter().copied().max().unwrap_or(0.0);
-        let worst_trade = losses.iter().copied().min().unwrap_or(0.0);
+        let best_trade = wins.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+        let worst_trade = losses.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
 
         // Exposure
         let in_market_count = in_market.iter().filter(|b| **b).count();

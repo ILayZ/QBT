@@ -1,0 +1,9 @@
+• DCA - Dollar-cost averaging at fixed intervals
+    Parameters: interval_hours, amount
+• MomentumSMA - Buy when price > SMA, sell when price < SMA
+    Parameters: lookback, buy_threshold, sell_threshold
+• VolAdjustedDCA - Increase DCA amount when volatility is high
+    Parameters: base_amount, vol_lookback, vol_multiplier_max
+• RegimeSwitch - Switch positions based on market regime detection
+    Parameters: fast_sma, slow_sma, buy_regime, sell_regime
+• Custom - User-defined strategy (requires custom implementation)

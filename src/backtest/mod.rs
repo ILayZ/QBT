@@ -149,14 +149,21 @@ impl Backtester {
                     }
                 }
                 Signal::Sell { amount } => {
-                    let sell_price = price * (1.0 - self.config.slippage);
-                    let fee = *amount * self.config.trading_fee;
-                    let proceeds = *amount - fee;
-
                     if position > 0.0 {
-                        let qty_to_sell = (*amount / sell_price).min(position);
+                        let sell_price = price * (1.0 - self.config.slippage);
+                        // `amount` is the notional $ to sell. A sentinel >= f64::MAX/2 means
+                        // "sell the entire position" (full exit).
+                        let sell_all = *amount >= f64::MAX / 2.0;
+                        let notional = if sell_all {
+                            position * sell_price
+                        } else {
+                            (*amount).min(position * sell_price)
+                        };
+                        let qty_to_sell = notional / sell_price;
+                        let proceeds = qty_to_sell * sell_price;
+                        let fee = proceeds * self.config.trading_fee;
                         position -= qty_to_sell;
-                        cash += qty_to_sell * sell_price - fee;
+                        cash += proceeds - fee;
 
                         let pnl = (sell_price - entry_price.unwrap_or(sell_price)) * qty_to_sell;
                         if pnl > 0.0 {
@@ -192,7 +199,8 @@ impl Backtester {
 
         // Calculate metrics
         let equity_vec: Vec<f64> = equity_curve.into();
-        let metrics = calculate_metrics(&equity_vec, &trades, self.config.risk_free_rate, series.len());
+        let mut metrics = calculate_metrics(&equity_vec, &trades, self.config.risk_free_rate, series.len());
+        metrics.strategy_name = strategy.name().to_string();
 
         info!(
             final_value = metrics.final_value,
@@ -227,24 +235,28 @@ impl Backtester {
         );
 
         let total_bars = series.len();
-        let bar_per_day = 24; // assume hourly bars
-        let train_bars = wf_config.train_months * 30 * bar_per_day;
-        let test_bars = wf_config.test_months * 30 * bar_per_day;
-        let step_bars = wf_config.step_months * 30 * bar_per_day;
+        let bar_per_day = 24usize; // assume hourly bars
+        let train_bars = (wf_config.train_months as usize) * 30 * bar_per_day;
+        let test_bars = (wf_config.test_months as usize) * 30 * bar_per_day;
+        let step_bars = (wf_config.step_months as usize) * 30 * bar_per_day;
 
         let mut oos_results: Vec<BacktestResult> = Vec::new();
-        let mut start = 0;
+        let mut start = 0usize;
 
         while start + train_bars + test_bars <= total_bars {
             let train_end = start + train_bars;
             let test_end = start + train_bars + test_bars;
 
             // Train: find best params (placeholder: just use factory)
-            let strategy = strategy_factory(train_end, test_end);
+            let strategy = strategy_factory(train_end as u32, test_end as u32);
 
-            // Test: run OOS
-            let oos_series = &series;
-            let oos_result = self.run(oos_series, &strategy)?;
+            // Test: run OOS on the test window [train_end, test_end)
+            let oos_bars: Vec<crate::data::Bar> = series.bars[train_end..test_end].to_vec();
+            let oos_series = crate::data::PriceSeries {
+                symbol: series.symbol.clone(),
+                bars: oos_bars,
+            };
+            let oos_result = self.run(&oos_series, &strategy)?;
             oos_results.push(oos_result);
 
             start += step_bars;
@@ -290,7 +302,7 @@ fn calculate_metrics(
     let total_return = (final_value - initial) / initial;
 
     // CAGR (assuming hourly bars, 365 days)
-    let hours_per_year = 24 * 365;
+    let hours_per_year: f64 = 24.0 * 365.0;
     let years = num_bars as f64 / hours_per_year;
     let cagr = if years > 0.0 {
         (final_value / initial).powf(1.0 / years) - 1.0
@@ -309,8 +321,8 @@ fn calculate_metrics(
             / (returns.len() - 1) as f64;
         variance.sqrt()
     };
-    let bars_per_year = 24 * 365.0;
-    let sharpe_ratio = std_ret > 0.0 {
+    let bars_per_year: f64 = 24.0 * 365.0;
+    let sharpe_ratio = if std_ret > 0.0 {
         ((mean_ret - risk_free_rate / bars_per_year) / std_ret) * (bars_per_year).sqrt()
     } else {
         0.0
@@ -327,7 +339,7 @@ fn calculate_metrics(
         let downside_var = downside_dev.iter().sum::<f64>() / (returns.len()) as f64;
         downside_var.sqrt()
     };
-    let sortino_ratio = downside_std > 0.0 {
+    let sortino_ratio = if downside_std > 0.0 {
         ((mean_ret - risk_free_rate / bars_per_year) / downside_std) * (bars_per_year).sqrt()
     } else {
         f64::INFINITY

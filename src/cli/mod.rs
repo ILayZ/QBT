@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 /// QBacktest - High-performance quantitative backtesting engine
 #[derive(FromArgs)]
-#[argh(dump)]
 pub struct Cli {
     /// subcommand
     #[argh(subcommand)]
@@ -12,22 +11,21 @@ pub struct Cli {
 }
 
 #[derive(FromArgs)]
+#[argh(subcommand)]
 pub enum Command {
     /// Run a backtest on a price series
-    #[argh(subcommand, name = "run")]
     Run(RunArgs),
     /// Walk-forward optimization
-    #[argh(subcommand, name = "walk-forward")]
     WalkForward(WalkForwardArgs),
     /// Generate HTML report
-    #[argh(subcommand, name = "report")]
     Report(ReportArgs),
     /// List available strategies
-    #[argh(subcommand, name = "strategies")]
     Strategies(StrategiesArgs),
 }
 
 #[derive(FromArgs)]
+#[argh(subcommand, name = "run")]
+/// Run a backtest on a price series
 pub struct RunArgs {
     /// input CSV file (OHLCV)
     #[argh(option)]
@@ -59,6 +57,8 @@ pub struct RunArgs {
 }
 
 #[derive(FromArgs)]
+#[argh(subcommand, name = "walk-forward")]
+/// Walk-forward optimization
 pub struct WalkForwardArgs {
     /// input CSV file
     #[argh(option)]
@@ -81,6 +81,8 @@ pub struct WalkForwardArgs {
 }
 
 #[derive(FromArgs)]
+#[argh(subcommand, name = "report")]
+/// Generate an HTML report from a JSON results file
 pub struct ReportArgs {
     /// input JSON file with results
     #[argh(option)]
@@ -91,6 +93,8 @@ pub struct ReportArgs {
 }
 
 #[derive(FromArgs)]
+#[argh(subcommand, name = "strategies")]
+/// List available strategies
 pub struct StrategiesArgs {
     /// show detailed strategy parameters
     #[argh(switch)]

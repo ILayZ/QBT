@@ -55,7 +55,7 @@ impl fmt::Display for Regime {
 }
 
 /// Strategy signal (buy/sell/hold)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Signal {
     Buy { amount: f64 },
     Sell { amount: f64 },
@@ -67,6 +67,10 @@ impl Signal {
         !matches!(self, Signal::Hold)
     }
 }
+
+/// Sentinel amount meaning "sell the entire position" (full exit).
+/// The backtester treats any Sell amount >= f64::MAX / 2 as a full-position exit.
+pub const SELL_ALL: f64 = f64::MAX / 4.0;
 
 /// Strategy trait (for future extensibility)
 pub trait StrategyEngine: Send + Sync {
@@ -144,10 +148,16 @@ impl Strategy {
         let closes = series.closes();
         match self {
             Strategy::DCA { interval_hours, amount } => {
-                let interval = *interval_hours;
-                let mut signals = Vec::new();
-                for i in (0..closes.len()).step_by(interval as usize) {
-                    signals.push(Signal::Buy { amount: *amount });
+                // Emit a signal for EVERY bar (Buy on interval boundaries, Hold otherwise)
+                // so the signal vector is the same length as the price series.
+                let interval = *interval_hours as usize;
+                let mut signals = Vec::with_capacity(closes.len());
+                for i in 0..closes.len() {
+                    if i % interval == 0 {
+                        signals.push(Signal::Buy { amount: *amount });
+                    } else {
+                        signals.push(Signal::Hold);
+                    }
                 }
                 signals
             }
@@ -166,7 +176,7 @@ impl Strategy {
                         signals.push(Signal::Buy { amount: 100.0 }); // placeholder
                         in_position = true;
                     } else if in_position && price < s * (1.0 - sell_threshold) {
-                        signals.push(Signal::Sell { amount: 100.0 });
+                        signals.push(Signal::Sell { amount: SELL_ALL });
                         in_position = false;
                     } else {
                         signals.push(Signal::Hold);
@@ -200,7 +210,7 @@ impl Strategy {
                         signals.push(Signal::Buy { amount: 100.0 });
                         position = 1.0;
                     } else if regime == *sell_regime && position == 1.0 {
-                        signals.push(Signal::Sell { amount: 100.0 });
+                        signals.push(Signal::Sell { amount: SELL_ALL });
                         position = 0.0;
                     } else {
                         signals.push(Signal::Hold);

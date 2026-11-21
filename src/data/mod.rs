@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -59,31 +59,6 @@ impl PriceSeries {
             .collect()
     }
 
-    /// Resample to a different timeframe (e.g., 1h -> 4h)
-    pub fn resample(&self, freq: Duration) -> Result<Self> {
-        let df = self.to_dataframe()?;
-        let resampled = df
-            .lazy()
-            .group_by_dynamic(
-                col("timestamp"),
-                DynamicGroupOptions {
-                    every: freq,
-                    period: freq,
-                    offset: Duration::zero(),
-                    ..Default::default()
-                },
-            )
-            .agg([
-                col("open").first().alias("open"),
-                col("high").max().alias("high"),
-                col("low").min().alias("low"),
-                col("close").last().alias("close"),
-                col("volume").sum().alias("volume"),
-            ])
-            .collect()?;
-        Ok(Self::from_dataframe(resampled, self.symbol.clone())?)
-    }
-
     pub fn to_dataframe(&self) -> Result<DataFrame> {
         let timestamps: Vec<i64> = self.bars.iter().map(|b| b.timestamp.timestamp_millis()).collect();
         let opens: Vec<f64> = self.bars.iter().map(|b| b.open).collect();
@@ -136,10 +111,11 @@ impl PriceSeries {
 
     /// Load from CSV file
     pub fn from_csv(path: &Path, symbol: String) -> Result<Self> {
-        let df = CsvReadOptions::default()
-            .with_has_header(true)
-            .with_try_parse_dates(true)
-            .try_into_reader_with_path(path.into())?
+        let mut read_options = CsvReadOptions::default().with_has_header(true);
+        read_options.parse_options =
+            std::sync::Arc::new(CsvParseOptions::default().with_try_parse_dates(true));
+        let df = read_options
+            .try_into_reader_with_file_path(Some(path.to_path_buf()))?
             .finish()?;
         Self::from_dataframe(df, symbol)
     }
@@ -152,9 +128,9 @@ impl PriceSeries {
 
     /// Save to Parquet
     pub fn to_parquet(&self, path: &Path) -> Result<()> {
-        let df = self.to_dataframe()?;
+        let mut df = self.to_dataframe()?;
         let mut file = std::fs::File::create(path)?;
-        ParquetWriter::new(&mut file).finish(&df)?;
+        ParquetWriter::new(&mut file).finish(&mut df)?;
         Ok(())
     }
 }
