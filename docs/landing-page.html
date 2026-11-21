@@ -26,7 +26,7 @@
 <body>
 <div class="wrap">
   <h1>qbacktest<span>.</span></h1>
-  <p class="sub">A fast, scriptable, reproducible backtesting engine for retail traders &amp; quant hobbyists.</p>
+  <p class="sub">Backtest in seconds. Own your data. — a fast, scriptable, reproducible backtesting engine for retail traders &amp; quant hobbyists. No cloud. No lock-in.</p>
 
   <a class="cta" href="#">Download for Linux (free)</a>
   <p style="color:var(--muted);font-size:.9rem;margin-top:.75rem;">Single static binary. No cloud subscription. No lock-in.</p>
@@ -48,6 +48,23 @@ qbacktest run --input btc_1h.csv --strategy DCA \
 
   <p style="color:var(--muted);">Input: <code>timestamp,open,high,low,close,volume</code> CSV or Parquet.</p>
 
+  <h2>Why it beats the alternatives</h2>
+  <table style="width:100%;border-collapse:collapse;margin:1rem 0 2rem;">
+    <thead>
+      <tr style="border-bottom:2px solid var(--border);text-align:left;">
+        <th style="padding:.6rem;">Cloud platforms</th>
+        <th style="padding:.6rem;">Python notebooks</th>
+        <th style="padding:.6rem;color:var(--accent);">qbacktest</th>
+      </tr>
+    </thead>
+    <tbody style="color:var(--muted);">
+      <tr><td style="padding:.5rem;border-bottom:1px solid var(--border);">Paid, slow, closed source</td><td style="padding:.5rem;border-bottom:1px solid var(--border);">Dependency hell, slow on big data</td><td style="padding:.5rem;border-bottom:1px solid var(--border);color:var(--fg);">Single static binary, zero runtime</td></tr>
+      <tr><td style="padding:.5rem;border-bottom:1px solid var(--border);">Your data leaves your machine</td><td style="padding:.5rem;border-bottom:1px solid var(--border);">Local but fragile</td><td style="padding:.5rem;border-bottom:1px solid var(--border);color:var(--fg);">Your data never leaves your machine</td></tr>
+      <tr><td style="padding:.5rem;border-bottom:1px solid var(--border);">Rigid, preset strategies</td><td style="padding:.5rem;border-bottom:1px solid var(--border);">You write everything yourself</td><td style="padding:.5rem;border-bottom:1px solid var(--border);color:var(--fg);">Real engine + built-in strategies + walk-forward</td></tr>
+      <tr><td style="padding:.5rem;">Opaque "AI" metrics</td><td style="padding:.5rem;">DIY, easy to get wrong</td><td style="padding:.5rem;color:var(--fg);">Standard metrics: Sharpe, Sortino, Max DD, Profit Factor</td></tr>
+    </tbody>
+  </table>
+
   <h2>Pricing</h2>
   <div class="cards">
     <div class="card">
@@ -62,6 +79,9 @@ qbacktest run --input btc_1h.csv --strategy DCA \
     </div>
   </div>
   <p style="color:var(--muted);font-size:.9rem;">Pro price is a proposal pending demand validation — pay-what-you-want launch may apply. Payments not yet enabled.</p>
+
+  <h2>About</h2>
+  <p style="color:var(--muted);">qbacktest is a fast, scriptable, reproducible backtesting engine for retail traders and quant hobbyists. A single Rust CLI binary reads CSV or Parquet, runs a strategy (DCA, MomentumSMA, VolAdjustedDCA, or your own), computes standard risk-adjusted metrics (Sharpe, Sortino, max drawdown, profit factor), and outputs a self-contained HTML report — no cloud, no subscriptions, no Python environment. Data stays on your machine.</p>
 
   <div class="footer">
     qbacktest — open-source core with a paid Pro tier (extra strategies, automated reports, portfolio backtests). © 2026

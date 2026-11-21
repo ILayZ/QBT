@@ -6,10 +6,16 @@ edition = "2024"
 [dependencies]
 # Data handling
 polars = { version = "0.42", features = ["csv", "parquet", "serde", "json", "ipc", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-decimal", "dtype-full", "lazy", "temporal", "timezones", "strings", "concat_str", "diagonal_concat"] }
+# polars-core 0.42 calls hashbrown::HashMap::raw_table_mut() (in categorical builder)
+# but never enables hashbrown's `raw` feature itself. Force-enable it so the
+# categorical module compiles (feature unification). No direct use; transitive only.
+hashbrown = { version = "0.14", features = ["raw"] }
 argh = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
+# Pinned to =0.4.43: chrono 0.4.44+ added `Datelike::quarter()`, which collides with
+# arrow-arith 51's own `ChronoDateExt::quarter()` extension trait -> E0034 ambiguity.
+chrono = { version = "=0.4.38", features = ["serde"] }
 thiserror = "1.0"
 anyhow = "1.0"
 # Parallel processing
