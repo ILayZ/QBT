@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qbacktest — Fast, scriptable backtesting</title>
+<style>
+  :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --card:#161b22; --border:#30363d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.6; }
+  .wrap { max-width:900px; margin:0 auto; padding:2.5rem 1.5rem; }
+  h1 { font-size:2.4rem; margin:0 0 .5rem; }
+  h1 span { color:var(--accent); }
+  .sub { color:var(--muted); font-size:1.15rem; margin-bottom:2rem; }
+  .cta { background:var(--accent); color:#0d1117; font-weight:700; padding:.75rem 1.5rem; border-radius:8px; text-decoration:none; display:inline-block; }
+  .cta:hover { opacity:.9; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; margin:2.5rem 0; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:1.25rem; }
+  .card h3 { margin:0 0 .5rem; font-size:1.05rem; }
+  .card p { color:var(--muted); margin:0; font-size:.95rem; }
+  pre { background:#010409; border:1px solid var(--border); border-radius:8px; padding:1rem; overflow-x:auto; font-size:.9rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .footer { color:var(--muted); font-size:.85rem; margin-top:3rem; border-top:1px solid var(--border); padding-top:1.5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>qbacktest<span>.</span></h1>
+  <p class="sub">A fast, scriptable, reproducible backtesting engine for retail traders &amp; quant hobbyists.</p>
+
+  <a class="cta" href="#">Download for Linux (free)</a>
+  <p style="color:var(--muted);font-size:.9rem;margin-top:.75rem;">Single static binary. No cloud subscription. No lock-in.</p>
+
+  <div class="cards">
+    <div class="card"><h3>⚡ Fast</h3><p>Rust + Polars. Run a strategy over months of hourly data in seconds.</p></div>
+    <div class="card"><h3>🔁 Reproducible</h3><p>Deterministic, scriptable, CI-friendly. Same inputs, same results.</p></div>
+    <div class="card"><h3>📊 Real metrics</h3><p>Sharpe, Sortino, max drawdown, win rate, profit factor, volatility.</p></div>
+    <div class="card"><h3>🧪 Walk-forward</h3><p>Out-of-sample validation with train/test splits and consistency scoring.</p></div>
+    <div class="card"><h3>📄 HTML reports</h3><p>Self-contained, shareable report with charts — no notebook needed.</p></div>
+    <div class="card"><h3>🔒 Yours</h3><p>Open-source core. Your data stays on your machine.</p></div>
+  </div>
+
+  <h2>Quick start</h2>
+<pre><code># DCA backtest on your OHLCV data
+qbacktest run --input btc_1h.csv --strategy DCA \
+  --dca-interval 24 --dca-amount 100 --capital 10000 \
+  --output report.html</code></pre>
+
+  <p style="color:var(--muted);">Input: <code>timestamp,open,high,low,close,volume</code> CSV or Parquet.</p>
+
+  <div class="footer">
+    qbacktest — open-source core with a paid Pro tier (extra strategies, automated reports, portfolio backtests). © 2026
+  </div>
+</div>
+</body>
+</html>
