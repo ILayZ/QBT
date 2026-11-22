@@ -28,6 +28,10 @@ jobs:
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
+        with:
+          # Enable Pages if not already enabled (uses repo-scoped GITHUB_TOKEN,
+          # which is not subject to the PAT trade-controls restriction)
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
