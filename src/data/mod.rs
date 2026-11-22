@@ -123,7 +123,7 @@ impl PriceSeries {
         let mut read_options = CsvReadOptions::default();
         read_options.has_header = true;
         read_options.parse_options = std::sync::Arc::new(
-            polars::prelude::CsvParseOptions::default().with_try_parse_dates(true)
+            polars::prelude::CsvParseOptions::default().with_try_parse_dates(true),
         );
         let df = read_options
             .try_into_reader_with_file_path(Some(path.to_path_buf()))?

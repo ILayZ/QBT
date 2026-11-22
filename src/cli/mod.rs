@@ -10,6 +10,7 @@ pub struct Cli {
     pub command: Command,
 }
 
+#[derive(FromArgs)]
 #[argh(subcommand)]
 pub enum Command {
     /// Run a backtest on a price series
