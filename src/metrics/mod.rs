@@ -51,7 +51,7 @@ impl PerformanceMetrics {
 
         // Sharpe
         let sharpe_ratio = if volatility > 0.0 {
-            ((mean_ret * bars_per_year - risk_free_rate) / volatility)
+            (mean_ret * bars_per_year - risk_free_rate) / volatility
         } else {
             0.0
         };

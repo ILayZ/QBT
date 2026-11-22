@@ -153,9 +153,9 @@ impl Backtester {
         let mut lots: Vec<Lot> = Vec::new(); // FIFO lot queue
         let mut equity_curve: VecDeque<f64> = VecDeque::new();
         let mut trades: Vec<Trade> = Vec::new();
-        let mut gross_profit = 0.0;
-        let mut gross_loss = 0.0;
-        let mut winning_trades = 0;
+        let mut _gross_profit = 0.0;
+        let mut _gross_loss = 0.0;
+        let mut _winning_trades = 0;
 
         // CF-019: Causal execution model
         // Signals are generated using data available at bar close.
@@ -211,7 +211,7 @@ impl Backtester {
 
                         // FIFO lot consumption
                         let mut remaining_to_sell = qty_to_sell;
-                        let mut realized_pnl = 0.0;
+                        let mut _realized_pnl = 0.0;
                         let mut consumed_lots: Vec<Lot> = Vec::new();
 
                         for lot in lots.drain(..) {
@@ -225,13 +225,13 @@ impl Backtester {
                             let exit_fee_per_unit = sell_price * self.config.trading_fee;
                             let net_sell_per_unit = sell_price - exit_fee_per_unit;
                             let pnl = (net_sell_per_unit - lot.cost_per_unit) * take;
-                            realized_pnl += pnl;
+                            _realized_pnl += pnl;
 
                             if pnl > 0.0 {
-                                gross_profit += pnl;
-                                winning_trades += 1;
+                                _gross_profit += pnl;
+                                _winning_trades += 1;
                             } else {
-                                gross_loss += -pnl;
+                                _gross_loss += -pnl;
                             }
 
                             trades.push(Trade {
@@ -271,7 +271,7 @@ impl Backtester {
 
         // Mark-to-market final value
         let position_qty: f64 = lots.iter().map(|l| l.quantity).sum();
-        let final_value = cash + position_qty * closes[closes.len() - 1];
+        let _final_value = cash + position_qty * closes[closes.len() - 1];
 
         // Calculate metrics
         let equity_vec: Vec<f64> = equity_curve.into();
@@ -505,7 +505,7 @@ fn calculate_metrics(
 
     BacktestResult {
         strategy_name: String::new(), // set by caller
-        initial_capital: initial_capital,
+        initial_capital,
         final_value,
         total_return,
         cagr,

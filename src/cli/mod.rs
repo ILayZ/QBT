@@ -10,7 +10,6 @@ pub struct Cli {
     pub command: Command,
 }
 
-#[derive(FromArgs)]
 #[argh(subcommand)]
 pub enum Command {
     /// Run a backtest on a price series
@@ -110,7 +109,6 @@ impl RunArgs {
         use crate::data::PriceSeries;
         use crate::report::HtmlReport;
         use crate::strategy::Strategy;
-        use chrono::TimeZone;
 
         // CF-017: Validate positive intervals and parameters at CLI boundary
         if self.dca_interval == 0 {

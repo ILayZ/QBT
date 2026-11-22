@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -43,6 +43,10 @@ impl PriceSeries {
 
     pub fn closes(&self) -> Vec<f64> {
         self.bars.iter().map(|b| b.close).collect()
+    }
+
+    pub fn opens(&self) -> Vec<f64> {
+        self.bars.iter().map(|b| b.open).collect()
     }
 
     pub fn returns(&self) -> Vec<f64> {
@@ -116,9 +120,11 @@ impl PriceSeries {
 
     /// Load from CSV file
     pub fn from_csv(path: &Path, symbol: String) -> Result<Self> {
-        let mut read_options = CsvReadOptions::default().with_has_header(true);
-        read_options.parse_options =
-            std::sync::Arc::new(CsvParseOptions::default().with_try_parse_dates(true));
+        let mut read_options = CsvReadOptions::default();
+        read_options.has_header = true;
+        read_options.parse_options = std::sync::Arc::new(
+            polars::prelude::CsvParseOptions::default().with_try_parse_dates(true)
+        );
         let df = read_options
             .try_into_reader_with_file_path(Some(path.to_path_buf()))?
             .finish()?;
