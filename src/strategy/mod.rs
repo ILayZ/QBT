@@ -151,6 +151,10 @@ impl Strategy {
                 // Emit a signal for EVERY bar (Buy on interval boundaries, Hold otherwise)
                 // so the signal vector is the same length as the price series.
                 let interval = *interval_hours as usize;
+                if interval == 0 {
+                    // Return all Hold signals rather than panic on division by zero
+                    return vec![Signal::Hold; closes.len()];
+                }
                 let mut signals = Vec::with_capacity(closes.len());
                 for i in 0..closes.len() {
                     if i % interval == 0 {
@@ -230,7 +234,7 @@ impl Strategy {
 mod tests {
     use super::*;
     use crate::data::Bar;
-    use chrono::TimeZone;
+    use chrono::{TimeZone, Utc};
 
     fn make_series(prices: Vec<f64>) -> PriceSeries {
         let bars: Vec<Bar> = prices

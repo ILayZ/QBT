@@ -90,6 +90,38 @@ impl Backtester {
 
     #[instrument(skip_all)]
     pub fn run(&self, series: &PriceSeries, strategy: &Strategy) -> Result<BacktestResult> {
+        // CF-017: Validate nonempty data and finite, economically valid inputs at engine boundary
+        if series.is_empty() {
+            anyhow::bail!("Price series is empty");
+        }
+        if self.config.initial_capital <= 0.0 {
+            anyhow::bail!("Initial capital must be positive");
+        }
+        if self.config.trading_fee < 0.0 || self.config.trading_fee >= 1.0 {
+            anyhow::bail!("Trading fee must be in [0, 1)");
+        }
+        if self.config.slippage < 0.0 || self.config.slippage >= 1.0 {
+            anyhow::bail!("Slippage must be in [0, 1)");
+        }
+        // Validate all prices are finite and positive
+        for (i, bar) in series.bars.iter().enumerate() {
+            if !bar.close.is_finite() || bar.close <= 0.0 {
+                anyhow::bail!("Invalid price at bar {}: {} (must be finite and positive)", i, bar.close);
+            }
+            if !bar.open.is_finite() || bar.open <= 0.0 {
+                anyhow::bail!("Invalid open price at bar {}: {}", i, bar.open);
+            }
+            if !bar.high.is_finite() || bar.high <= 0.0 {
+                anyhow::bail!("Invalid high price at bar {}: {}", i, bar.high);
+            }
+            if !bar.low.is_finite() || bar.low <= 0.0 {
+                anyhow::bail!("Invalid low price at bar {}: {}", i, bar.low);
+            }
+            if !bar.volume.is_finite() || bar.volume < 0.0 {
+                anyhow::bail!("Invalid volume at bar {}: {}", i, bar.volume);
+            }
+        }
+
         info!(
             symbol = %series.symbol,
             strategy = strategy.name(),
@@ -199,7 +231,7 @@ impl Backtester {
 
         // Calculate metrics
         let equity_vec: Vec<f64> = equity_curve.into();
-        let mut metrics = calculate_metrics(&equity_vec, &trades, self.config.risk_free_rate, series.len());
+        let mut metrics = calculate_metrics(&equity_vec, &trades, self.config.risk_free_rate, series.len(), self.config.initial_capital);
         metrics.strategy_name = strategy.name().to_string();
 
         info!(
@@ -228,6 +260,20 @@ impl Backtester {
         strategy_factory: impl Fn(u32, u32) -> Strategy + Send + Sync,
         wf_config: &WalkForwardConfig,
     ) -> Result<WalkForwardResult> {
+        // CF-017: Validate walk-forward config at engine boundary
+        if wf_config.train_months == 0 {
+            anyhow::bail!("Walk-forward train_months must be positive");
+        }
+        if wf_config.test_months == 0 {
+            anyhow::bail!("Walk-forward test_months must be positive");
+        }
+        if wf_config.step_months == 0 {
+            anyhow::bail!("Walk-forward step_months must be positive");
+        }
+        if series.is_empty() {
+            anyhow::bail!("Price series is empty");
+        }
+
         info!(
             train_months = wf_config.train_months,
             test_months = wf_config.test_months,
@@ -239,6 +285,10 @@ impl Backtester {
         let train_bars = (wf_config.train_months as usize) * 30 * bar_per_day;
         let test_bars = (wf_config.test_months as usize) * 30 * bar_per_day;
         let step_bars = (wf_config.step_months as usize) * 30 * bar_per_day;
+
+        if train_bars == 0 || test_bars == 0 || step_bars == 0 {
+            anyhow::bail!("Computed window sizes are zero; check train/test/step months and bar frequency");
+        }
 
         let mut oos_results: Vec<BacktestResult> = Vec::new();
         let mut start = 0usize;
@@ -295,10 +345,11 @@ fn calculate_metrics(
     trades: &[Trade],
     risk_free_rate: f64,
     num_bars: usize,
+    initial_capital: f64,
 ) -> BacktestResult {
-    // Total return
-    let initial = equity.first().copied().unwrap_or(1.0);
-    let final_value = equity.last().copied().unwrap_or(1.0);
+    // Total return: use configured initial capital, not first post-trade equity
+    let initial = initial_capital;
+    let final_value = equity.last().copied().unwrap_or(initial);
     let total_return = (final_value - initial) / initial;
 
     // CAGR (assuming hourly bars, 365 days)
@@ -345,8 +396,8 @@ fn calculate_metrics(
         f64::INFINITY
     };
 
-    // Max drawdown
-    let mut peak = equity[0];
+    // Max drawdown: include pre-trade initial capital as starting peak
+    let mut peak = initial_capital;
     let mut max_dd = 0.0;
     for &val in equity.iter() {
         if val > peak {
@@ -358,9 +409,9 @@ fn calculate_metrics(
         }
     }
 
-    // Ulcer index
+    // Ulcer index: include pre-trade initial capital
     let dd_values: Vec<f64> = {
-        let mut peak = equity[0];
+        let mut peak = initial_capital;
         equity.iter().map(|&val| {
             if val > peak {
                 peak = val;
@@ -381,7 +432,7 @@ fn calculate_metrics(
 
     BacktestResult {
         strategy_name: String::new(), // set by caller
-        initial_capital: initial,
+        initial_capital: initial_capital,
         final_value,
         total_return,
         cagr,
@@ -401,7 +452,7 @@ fn calculate_metrics(
 mod tests {
     use super::*;
     use crate::data::Bar;
-    use chrono::TimeZone;
+    use chrono::{TimeZone, Utc};
 
     fn make_series(prices: Vec<f64>) -> PriceSeries {
         let bars: Vec<Bar> = prices
@@ -442,5 +493,33 @@ mod tests {
 
         // Should have entered and exited
         assert!(result.num_trades >= 2);
+    }
+
+    // CF-015: First-bar costs omitted from performance.
+    // Initial capital must be the configured starting capital, not the first
+    // post-trade equity. Regression test: flat $100 bars, DCA buys $100 once
+    // with 10% fee on $1000 capital. Expected: initial=1000, final=990, return=-1%.
+    #[test]
+    fn test_cf015_first_bar_costs_included() {
+        // 1500 flat bars at $100
+        let prices = vec![100.0; 1500];
+        let series = make_series(prices);
+        // DCA interval 9999 > 1500 bars => only first bar buys
+        let strategy = Strategy::DCA { interval_hours: 9999, amount: 100.0 };
+        let config = BacktestConfig {
+            initial_capital: 1000.0,
+            trading_fee: 0.1,
+            slippage: 0.0,
+            risk_free_rate: 0.03,
+        };
+        let bt = Backtester::new(config);
+        let result = bt.run(&series, &strategy).unwrap();
+
+        // Configured initial capital retained
+        assert_eq!(result.initial_capital, 1000.0);
+        // First-bar fee: $100 buy at 10% fee => $110 cost => final equity $990
+        assert!((result.final_value - 990.0).abs() < 1e-9, "final_value={}", result.final_value);
+        // Return = -1% (990 - 1000) / 1000
+        assert!((result.total_return - (-0.01)).abs() < 1e-9, "total_return={}", result.total_return);
     }
 }

@@ -109,6 +109,20 @@ impl RunArgs {
         use crate::strategy::Strategy;
         use chrono::TimeZone;
 
+        // CF-017: Validate positive intervals and parameters at CLI boundary
+        if self.dca_interval == 0 {
+            anyhow::bail!("DCA interval must be positive, got 0");
+        }
+        if self.capital <= 0.0 {
+            anyhow::bail!("Initial capital must be positive, got {}", self.capital);
+        }
+        if self.fee < 0.0 || self.fee >= 1.0 {
+            anyhow::bail!("Trading fee must be in [0, 1), got {}", self.fee);
+        }
+        if self.slippage < 0.0 || self.slippage >= 1.0 {
+            anyhow::bail!("Slippage must be in [0, 1), got {}", self.slippage);
+        }
+
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
 
         let strategy: Strategy = match self.strategy.to_uppercase().as_str() {
@@ -154,6 +168,17 @@ impl WalkForwardArgs {
         use crate::data::PriceSeries;
         use crate::report::HtmlReport;
         use crate::strategy::Strategy;
+
+        // CF-017: Validate positive intervals and window sizes at CLI boundary
+        if self.train == 0 {
+            anyhow::bail!("Train months must be positive, got 0");
+        }
+        if self.test == 0 {
+            anyhow::bail!("Test months must be positive, got 0");
+        }
+        if self.step == 0 {
+            anyhow::bail!("Step months must be positive, got 0");
+        }
 
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
         let bt = Backtester::new(BacktestConfig::default());
