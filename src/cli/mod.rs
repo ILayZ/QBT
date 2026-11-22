@@ -180,6 +180,51 @@ impl WalkForwardArgs {
             anyhow::bail!("Step months must be positive, got 0");
         }
 
+        // Parse and validate strategy (CF-016: walk-forward must respect --strategy)
+        let strategy_name = self.strategy.to_uppercase();
+
+        // Validate strategy name early with clear error
+        match strategy_name.as_str() {
+            "DCA" | "MOMENTUMSMA" | "VOLDCA" | "REGIMESWITCH" => {}
+            _ => anyhow::bail!(
+                "Unknown strategy for walk-forward: {}. Supported: DCA, MomentumSMA, VolAdjustedDCA, RegimeSwitch",
+                self.strategy
+            ),
+        }
+
+        let strategy_factory = move |_train_end: u32, _test_end: u32| -> Strategy {
+            match strategy_name.as_str() {
+                "DCA" => Strategy::DCA {
+                    interval_hours: 24,
+                    amount: 100.0,
+                },
+                "MOMENTUMSMA" => Strategy::MomentumSMA {
+                    lookback: 20,
+                    buy_threshold: 0.01,
+                    sell_threshold: 0.01,
+                },
+                "VOLDCA" => Strategy::VolAdjustedDCA {
+                    base_amount: 100.0,
+                    vol_lookback: 30,
+                    vol_multiplier_max: 2.0,
+                },
+                "REGIMESWITCH" => Strategy::RegimeSwitch {
+                    fast_sma: 10,
+                    slow_sma: 50,
+                    buy_regime: crate::strategy::Regime::Bull,
+                    sell_regime: crate::strategy::Regime::Bear,
+                },
+                _ => {
+                    // This should not be reached since we validate above, but keep for safety
+                    Strategy::MomentumSMA {
+                        lookback: 20,
+                        buy_threshold: 0.01,
+                        sell_threshold: 0.01,
+                    }
+                }
+            }
+        };
+
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
         let bt = Backtester::new(BacktestConfig::default());
 
@@ -189,15 +234,7 @@ impl WalkForwardArgs {
             step_months: self.step,
         };
 
-        let wf_result = bt.walk_forward(
-            &series,
-            |_train_end, _test_end| Strategy::MomentumSMA {
-                lookback: 20,
-                buy_threshold: 0.01,
-                sell_threshold: 0.01,
-            },
-            &wf_config,
-        )?;
+        let wf_result = bt.walk_forward(&series, strategy_factory, &wf_config)?;
 
         let results = wf_result.out_of_sample_results;
         HtmlReport::generate(&results, &self.output)?;

@@ -174,8 +174,10 @@ impl Strategy {
                         signals.push(Signal::Hold);
                         continue;
                     }
-                    let price = closes[i];
-                    let s = sma_vals[i];
+                    // CF-019: Use prior-bar close for signal generation (causal)
+                    // Signal at bar i uses close[i-1] and SMA[i-1] (known at bar i's open)
+                    let price = closes[i - 1];
+                    let s = sma_vals[i - 1];
                     if !in_position && price > s * (1.0 + buy_threshold) {
                         signals.push(Signal::Buy { amount: 100.0 }); // placeholder
                         in_position = true;
@@ -209,7 +211,13 @@ impl Strategy {
                 let mut signals = Vec::with_capacity(closes.len());
                 let mut position = 0.0; // 0 = no position, 1 = full
                 for i in 0..closes.len() {
-                    let regime = detect_regime(&fast_vals, &slow_vals, i);
+                    // CF-019: Use prior-bar regime for signal generation (causal)
+                    // Regime at bar i uses SMA values from bar i-1
+                    let regime = if i > 0 {
+                        detect_regime(&fast_vals, &slow_vals, i - 1)
+                    } else {
+                        Regime::Sideways
+                    };
                     if regime == *buy_regime && position == 0.0 {
                         signals.push(Signal::Buy { amount: 100.0 });
                         position = 1.0;
