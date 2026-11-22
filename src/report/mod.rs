@@ -76,7 +76,7 @@ impl HtmlReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::{Trade, BacktestResult};
+    use crate::backtest::{BacktestResult, Trade};
 
     #[test]
     fn test_generate_report() {

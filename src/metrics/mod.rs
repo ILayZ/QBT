@@ -32,7 +32,10 @@ impl PerformanceMetrics {
         in_market: &[bool],
         trade_pnls: &[f64],
     ) -> Self {
-        let total_return = equity.last().map(|e| e / equity.first().unwrap_or(&1.0) - 1.0).unwrap_or(0.0);
+        let total_return = equity
+            .last()
+            .map(|e| e / equity.first().unwrap_or(&1.0) - 1.0)
+            .unwrap_or(0.0);
         let years = equity.len() as f64 / bars_per_year;
         let cagr = if years > 0.0 && equity.first().map(|e| *e > 0.0).unwrap_or(false) {
             (equity.last().unwrap() / equity.first().unwrap()).powf(1.0 / years) - 1.0
@@ -42,7 +45,8 @@ impl PerformanceMetrics {
 
         // Volatility
         let mean_ret = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter().map(|r| (r - mean_ret).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
+        let variance = returns.iter().map(|r| (r - mean_ret).powi(2)).sum::<f64>()
+            / (returns.len() - 1) as f64;
         let volatility = variance.sqrt() * (bars_per_year).sqrt();
 
         // Sharpe
@@ -85,36 +89,76 @@ impl PerformanceMetrics {
         }
 
         // Calmar
-        let calmar_ratio = if max_dd > 0.0 { cagr / max_dd } else { f64::INFINITY };
+        let calmar_ratio = if max_dd > 0.0 {
+            cagr / max_dd
+        } else {
+            f64::INFINITY
+        };
 
         // Ulcer index
         let dd_values: Vec<f64> = {
             let mut peak = equity[0];
-            equity.iter().map(|&val| {
-                if val > peak {
-                    peak = val;
-                }
-                (peak - val) / peak
-            }).collect()
+            equity
+                .iter()
+                .map(|&val| {
+                    if val > peak {
+                        peak = val;
+                    }
+                    (peak - val) / peak
+                })
+                .collect()
         };
-        let ulcer_index = (dd_values.iter().map(|d| d * d).sum::<f64>() / dd_values.len() as f64 * 100.0).sqrt();
+        let ulcer_index =
+            (dd_values.iter().map(|d| d * d).sum::<f64>() / dd_values.len() as f64 * 100.0).sqrt();
 
         // Trade stats
         let wins: Vec<f64> = trade_pnls.iter().filter(|p| **p > 0.0).copied().collect();
         let losses: Vec<f64> = trade_pnls.iter().filter(|p| **p < 0.0).copied().collect();
-        let win_rate = if !trade_pnls.is_empty() { wins.len() as f64 / trade_pnls.len() as f64 } else { 0.0 };
+        let win_rate = if !trade_pnls.is_empty() {
+            wins.len() as f64 / trade_pnls.len() as f64
+        } else {
+            0.0
+        };
         let gross_profit: f64 = wins.iter().sum();
         let gross_loss: f64 = losses.iter().map(|p| -p).sum();
-        let profit_factor = if gross_loss > 0.0 { gross_profit / gross_loss } else { f64::INFINITY };
-        let avg_trade_pnl = if !trade_pnls.is_empty() { trade_pnls.iter().sum::<f64>() / trade_pnls.len() as f64 } else { 0.0 };
-        let avg_win = if !wins.is_empty() { gross_profit / wins.len() as f64 } else { 0.0 };
-        let avg_loss = if !losses.is_empty() { gross_loss / losses.len() as f64 } else { 0.0 };
-        let best_trade = wins.iter().copied().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
-        let worst_trade = losses.iter().copied().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+        let profit_factor = if gross_loss > 0.0 {
+            gross_profit / gross_loss
+        } else {
+            f64::INFINITY
+        };
+        let avg_trade_pnl = if !trade_pnls.is_empty() {
+            trade_pnls.iter().sum::<f64>() / trade_pnls.len() as f64
+        } else {
+            0.0
+        };
+        let avg_win = if !wins.is_empty() {
+            gross_profit / wins.len() as f64
+        } else {
+            0.0
+        };
+        let avg_loss = if !losses.is_empty() {
+            gross_loss / losses.len() as f64
+        } else {
+            0.0
+        };
+        let best_trade = wins
+            .iter()
+            .copied()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+        let worst_trade = losses
+            .iter()
+            .copied()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
 
         // Exposure
         let in_market_count = in_market.iter().filter(|b| **b).count();
-        let exposure = if !in_market.is_empty() { in_market_count as f64 / in_market.len() as f64 } else { 0.0 };
+        let exposure = if !in_market.is_empty() {
+            in_market_count as f64 / in_market.len() as f64
+        } else {
+            0.0
+        };
 
         Self {
             total_return,
@@ -168,14 +212,12 @@ mod tests {
     #[test]
     fn test_calculate() {
         let equity = vec![10000.0, 10100.0, 9900.0, 10200.0, 10500.0];
-        let returns: Vec<f64> = equity
-            .windows(2)
-            .map(|w| (w[1] - w[0]) / w[0])
-            .collect();
+        let returns: Vec<f64> = equity.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
         let in_market = vec![true, true, false, true, true];
         let trade_pnls = vec![100.0, -50.0, 200.0];
 
-        let metrics = PerformanceMetrics::calculate(&equity, &returns, 0.03, 8760.0, &in_market, &trade_pnls);
+        let metrics =
+            PerformanceMetrics::calculate(&equity, &returns, 0.03, 8760.0, &in_market, &trade_pnls);
 
         assert!(metrics.total_return > 0.0);
         assert!(metrics.max_drawdown > 0.0);

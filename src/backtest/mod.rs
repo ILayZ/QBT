@@ -21,12 +21,12 @@ pub struct BacktestResult {
     pub initial_capital: f64,
     pub final_value: f64,
     pub total_return: f64, // percentage
-    pub cagr: f64, // annualized
+    pub cagr: f64,         // annualized
     pub sharpe_ratio: f64,
     pub sortino_ratio: f64,
     pub max_drawdown: f64,
     pub ulcer_index: f64,
-    pub win_rate: f64, // % of profitable trades
+    pub win_rate: f64,      // % of profitable trades
     pub profit_factor: f64, // gross profit / gross loss
     pub num_trades: usize,
     pub equity_curve: Vec<f64>,
@@ -47,8 +47,8 @@ pub struct Trade {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
     pub initial_capital: f64,
-    pub trading_fee: f64, // e.g., 0.001 = 0.1%
-    pub slippage: f64, // e.g., 0.0005 = 0.05%
+    pub trading_fee: f64,    // e.g., 0.001 = 0.1%
+    pub slippage: f64,       // e.g., 0.0005 = 0.05%
     pub risk_free_rate: f64, // annual, e.g., 0.03
 }
 
@@ -73,7 +73,11 @@ pub struct WalkForwardConfig {
 
 impl Default for WalkForwardConfig {
     fn default() -> Self {
-        Self { train_months: 12, test_months: 6, step_months: 6 }
+        Self {
+            train_months: 12,
+            test_months: 6,
+            step_months: 6,
+        }
     }
 }
 
@@ -114,7 +118,11 @@ impl Backtester {
         // Validate all prices are finite and positive
         for (i, bar) in series.bars.iter().enumerate() {
             if !bar.close.is_finite() || bar.close <= 0.0 {
-                anyhow::bail!("Invalid price at bar {}: {} (must be finite and positive)", i, bar.close);
+                anyhow::bail!(
+                    "Invalid price at bar {}: {} (must be finite and positive)",
+                    i,
+                    bar.close
+                );
             }
             if !bar.open.is_finite() || bar.open <= 0.0 {
                 anyhow::bail!("Invalid open price at bar {}: {}", i, bar.open);
@@ -267,7 +275,13 @@ impl Backtester {
 
         // Calculate metrics
         let equity_vec: Vec<f64> = equity_curve.into();
-        let mut metrics = calculate_metrics(&equity_vec, &trades, self.config.risk_free_rate, series.len(), self.config.initial_capital);
+        let mut metrics = calculate_metrics(
+            &equity_vec,
+            &trades,
+            self.config.risk_free_rate,
+            series.len(),
+            self.config.initial_capital,
+        );
         metrics.strategy_name = strategy.name().to_string();
 
         info!(
@@ -323,7 +337,9 @@ impl Backtester {
         let step_bars = (wf_config.step_months as usize) * 30 * bar_per_day;
 
         if train_bars == 0 || test_bars == 0 || step_bars == 0 {
-            anyhow::bail!("Computed window sizes are zero; check train/test/step months and bar frequency");
+            anyhow::bail!(
+                "Computed window sizes are zero; check train/test/step months and bar frequency"
+            );
         }
 
         let mut oos_results: Vec<BacktestResult> = Vec::new();
@@ -352,10 +368,10 @@ impl Backtester {
             anyhow::bail!("Insufficient data for walk-forward with current window sizes");
         }
 
-        let total_oos_return: f64 = oos_results.iter().map(|r| r.total_return).sum::<f64>()
-            / oos_results.len() as f64;
-        let avg_oos_sharpe: f64 = oos_results.iter().map(|r| r.sharpe_ratio).sum::<f64>()
-            / oos_results.len() as f64;
+        let total_oos_return: f64 =
+            oos_results.iter().map(|r| r.total_return).sum::<f64>() / oos_results.len() as f64;
+        let avg_oos_sharpe: f64 =
+            oos_results.iter().map(|r| r.sharpe_ratio).sum::<f64>() / oos_results.len() as f64;
         let consistency = oos_results.iter().filter(|r| r.total_return > 0.0).count() as f64
             / oos_results.len() as f64;
 
@@ -398,10 +414,7 @@ fn calculate_metrics(
     };
 
     // Sharpe ratio
-    let returns: Vec<f64> = equity
-        .windows(2)
-        .map(|w| (w[1] - w[0]) / w[0])
-        .collect();
+    let returns: Vec<f64> = equity.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
     let mean_ret = returns.iter().sum::<f64>() / returns.len() as f64;
     let std_ret = {
         let variance = returns.iter().map(|r| (r - mean_ret).powi(2)).sum::<f64>()
@@ -448,23 +461,47 @@ fn calculate_metrics(
     // Ulcer index: include pre-trade initial capital
     let dd_values: Vec<f64> = {
         let mut peak = initial_capital;
-        equity.iter().map(|&val| {
-            if val > peak {
-                peak = val;
-            }
-            (peak - val) / peak
-        }).collect()
+        equity
+            .iter()
+            .map(|&val| {
+                if val > peak {
+                    peak = val;
+                }
+                (peak - val) / peak
+            })
+            .collect()
     };
     let ulcer_index = dd_values.iter().map(|d| d * d).sum::<f64>() / dd_values.len() as f64;
     let ulcer_index = (ulcer_index * 100.0).sqrt();
 
     // Trade metrics
     let num_trades = trades.len();
-    let gross_profit: f64 = trades.iter().filter_map(|t| t.pnl).filter(|p| *p > 0.0).sum();
-    let gross_loss: f64 = trades.iter().filter_map(|t| t.pnl).filter(|p| *p < 0.0).map(|p| -p).sum();
-    let winning_trades = trades.iter().filter_map(|t| t.pnl).filter(|p| *p > 0.0).count();
-    let win_rate = if num_trades > 0 { winning_trades as f64 / num_trades as f64 } else { 0.0 };
-    let profit_factor = if gross_loss > 0.0 { gross_profit / gross_loss } else { f64::INFINITY };
+    let gross_profit: f64 = trades
+        .iter()
+        .filter_map(|t| t.pnl)
+        .filter(|p| *p > 0.0)
+        .sum();
+    let gross_loss: f64 = trades
+        .iter()
+        .filter_map(|t| t.pnl)
+        .filter(|p| *p < 0.0)
+        .map(|p| -p)
+        .sum();
+    let winning_trades = trades
+        .iter()
+        .filter_map(|t| t.pnl)
+        .filter(|p| *p > 0.0)
+        .count();
+    let win_rate = if num_trades > 0 {
+        winning_trades as f64 / num_trades as f64
+    } else {
+        0.0
+    };
+    let profit_factor = if gross_loss > 0.0 {
+        gross_profit / gross_loss
+    } else {
+        f64::INFINITY
+    };
 
     BacktestResult {
         strategy_name: String::new(), // set by caller
@@ -503,14 +540,20 @@ mod tests {
                 volume: 1000.0,
             })
             .collect();
-        PriceSeries { symbol: "TEST".into(), bars }
+        PriceSeries {
+            symbol: "TEST".into(),
+            bars,
+        }
     }
 
     #[test]
     fn test_simple_backtest() {
         let prices: Vec<f64> = (0..100).map(|i| 100.0 + i as f64 * 0.1).collect();
         let series = make_series(prices);
-        let strategy = Strategy::DCA { interval_hours: 10, amount: 50.0 };
+        let strategy = Strategy::DCA {
+            interval_hours: 10,
+            amount: 50.0,
+        };
         let bt = Backtester::new(BacktestConfig::default());
         let result = bt.run(&series, &strategy).unwrap();
 
@@ -523,7 +566,11 @@ mod tests {
     fn test_momentum_backtest() {
         let prices = vec![100.0, 101.0, 102.0, 110.0, 115.0, 120.0, 110.0, 100.0, 90.0];
         let series = make_series(prices);
-        let strategy = Strategy::MomentumSMA { lookback: 3, buy_threshold: 0.01, sell_threshold: 0.01 };
+        let strategy = Strategy::MomentumSMA {
+            lookback: 3,
+            buy_threshold: 0.01,
+            sell_threshold: 0.01,
+        };
         let bt = Backtester::new(BacktestConfig::default());
         let result = bt.run(&series, &strategy).unwrap();
 
@@ -541,7 +588,10 @@ mod tests {
         let prices = vec![100.0; 1500];
         let series = make_series(prices);
         // DCA interval 9999 > 1500 bars => only first bar buys
-        let strategy = Strategy::DCA { interval_hours: 9999, amount: 100.0 };
+        let strategy = Strategy::DCA {
+            interval_hours: 9999,
+            amount: 100.0,
+        };
         let config = BacktestConfig {
             initial_capital: 1000.0,
             trading_fee: 0.1,
@@ -554,9 +604,17 @@ mod tests {
         // Configured initial capital retained
         assert_eq!(result.initial_capital, 1000.0);
         // First-bar fee: $100 buy at 10% fee => $110 cost => final equity $990
-        assert!((result.final_value - 990.0).abs() < 1e-9, "final_value={}", result.final_value);
+        assert!(
+            (result.final_value - 990.0).abs() < 1e-9,
+            "final_value={}",
+            result.final_value
+        );
         // Return = -1% (990 - 1000) / 1000
-        assert!((result.total_return - (-0.01)).abs() < 1e-9, "total_return={}", result.total_return);
+        assert!(
+            (result.total_return - (-0.01)).abs() < 1e-9,
+            "total_return={}",
+            result.total_return
+        );
     }
 
     // CF-018: Trade P&L cost basis and fees.
@@ -584,7 +642,11 @@ mod tests {
         let result = bt.run(&series, &strategy).unwrap();
 
         // Verify reconciliation: when position fully closed, sum(trade.pnl) == equity change
-        let open_trades = result.trade_log.iter().filter(|t| t.exit_time.is_none()).count();
+        let open_trades = result
+            .trade_log
+            .iter()
+            .filter(|t| t.exit_time.is_none())
+            .count();
         if open_trades == 0 && result.num_trades > 0 {
             let sum_pnl: f64 = result.trade_log.iter().filter_map(|t| t.pnl).sum();
             let equity_change = result.final_value - result.initial_capital;
@@ -642,18 +704,26 @@ mod tests {
         // Key assertion: NO trade should have entry_time at bar 5 (the jump bar)
         // because signal at bar 5 uses bar 4 data (pre-jump)
         let jump_bar_idx = 5; // 0-indexed: bar 5 is first 200 close
-        let trades_at_jump = result.trade_log.iter()
+        let trades_at_jump = result
+            .trade_log
+            .iter()
             .filter(|t| t.entry_time == series.bars[jump_bar_idx].timestamp)
             .count();
-        assert_eq!(trades_at_jump, 0, "Causal violation: trade entered at jump bar using same-bar close");
+        assert_eq!(
+            trades_at_jump, 0,
+            "Causal violation: trade entered at jump bar using same-bar close"
+        );
 
         // First buy should be at bar 7 (execution) or later
         // Bar 6 signal -> execution at bar 7 open
         if result.num_trades > 0 {
             let first_entry_time = result.trade_log[0].entry_time;
             let expected_first_exec_time = series.bars[7].timestamp; // bar 7 open = bar 6 signal execution
-            assert_eq!(first_entry_time, expected_first_exec_time,
-                "First trade should execute at bar 7 open (causal), got {:?}", first_entry_time);
+            assert_eq!(
+                first_entry_time, expected_first_exec_time,
+                "First trade should execute at bar 7 open (causal), got {:?}",
+                first_entry_time
+            );
         }
 
         // Verify signal generation uses prior-bar: the jump at bar 5 should NOT produce a signal at bar 5

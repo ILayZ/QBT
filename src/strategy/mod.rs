@@ -7,10 +7,7 @@ use std::fmt;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Strategy {
     /// Dollar-cost averaging at fixed intervals
-    DCA {
-        interval_hours: u32,
-        amount: f64,
-    },
+    DCA { interval_hours: u32, amount: f64 },
     /// Momentum-based (buy when price > SMA, sell when price < SMA)
     MomentumSMA {
         lookback: u32,
@@ -102,10 +99,7 @@ pub fn rolling_vol(series: &[f64], window: usize) -> Vec<f64> {
     if window == 0 || series.len() < 2 {
         return vec![f64::NAN; series.len()];
     }
-    let rets: Vec<f64> = series
-        .windows(2)
-        .map(|w| (w[1] - w[0]) / w[0])
-        .collect();
+    let rets: Vec<f64> = series.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
     let mut result = vec![f64::NAN; series.len()];
     for i in window..series.len() {
         let chunk = &rets[i - window..i];
@@ -147,7 +141,10 @@ impl Strategy {
     pub fn generate_signals(&self, series: &PriceSeries) -> Vec<Signal> {
         let closes = series.closes();
         match self {
-            Strategy::DCA { interval_hours, amount } => {
+            Strategy::DCA {
+                interval_hours,
+                amount,
+            } => {
                 // Emit a signal for EVERY bar (Buy on interval boundaries, Hold otherwise)
                 // so the signal vector is the same length as the price series.
                 let interval = *interval_hours as usize;
@@ -165,7 +162,11 @@ impl Strategy {
                 }
                 signals
             }
-            Strategy::MomentumSMA { lookback, buy_threshold, sell_threshold } => {
+            Strategy::MomentumSMA {
+                lookback,
+                buy_threshold,
+                sell_threshold,
+            } => {
                 let sma_vals = sma(&closes, *lookback as usize);
                 let mut signals = Vec::with_capacity(closes.len());
                 let mut in_position = false;
@@ -190,7 +191,11 @@ impl Strategy {
                 }
                 signals
             }
-            Strategy::VolAdjustedDCA { base_amount, vol_lookback, vol_multiplier_max } => {
+            Strategy::VolAdjustedDCA {
+                base_amount,
+                vol_lookback,
+                vol_multiplier_max,
+            } => {
                 let vols = rolling_vol(&closes, *vol_lookback as usize);
                 let mut signals = Vec::with_capacity(closes.len());
                 for i in 0..closes.len() {
@@ -205,7 +210,12 @@ impl Strategy {
                 }
                 signals
             }
-            Strategy::RegimeSwitch { fast_sma, slow_sma, buy_regime, sell_regime } => {
+            Strategy::RegimeSwitch {
+                fast_sma,
+                slow_sma,
+                buy_regime,
+                sell_regime,
+            } => {
                 let fast_vals = sma(&closes, *fast_sma as usize);
                 let slow_vals = sma(&closes, *slow_sma as usize);
                 let mut signals = Vec::with_capacity(closes.len());
@@ -257,7 +267,10 @@ mod tests {
                 volume: 1000.0,
             })
             .collect();
-        PriceSeries { symbol: "TEST".into(), bars }
+        PriceSeries {
+            symbol: "TEST".into(),
+            bars,
+        }
     }
 
     #[test]
@@ -284,9 +297,15 @@ mod tests {
     fn test_dca_signals() {
         let prices: Vec<f64> = (0..10).map(|i| 100.0 + i as f64).collect();
         let series = make_series(prices);
-        let strat = Strategy::DCA { interval_hours: 3, amount: 50.0 };
+        let strat = Strategy::DCA {
+            interval_hours: 3,
+            amount: 50.0,
+        };
         let signals = strat.generate_signals(&series);
-        let buys = signals.iter().filter(|s| matches!(s, Signal::Buy { .. })).count();
+        let buys = signals
+            .iter()
+            .filter(|s| matches!(s, Signal::Buy { .. }))
+            .count();
         assert_eq!(buys, 4); // 0, 3, 6, 9
     }
 
@@ -294,11 +313,18 @@ mod tests {
     fn test_momentum_signals() {
         let prices = vec![100.0, 101.0, 102.0, 110.0, 105.0, 100.0];
         let series = make_series(prices);
-        let strat = Strategy::MomentumSMA { lookback: 3, buy_threshold: 0.01, sell_threshold: 0.01 };
+        let strat = Strategy::MomentumSMA {
+            lookback: 3,
+            buy_threshold: 0.01,
+            sell_threshold: 0.01,
+        };
         let signals = strat.generate_signals(&series);
         assert_eq!(signals.len(), 6);
         // Should have at least one buy and one sell
-        let buys = signals.iter().filter(|s| matches!(s, Signal::Buy { .. })).count();
+        let buys = signals
+            .iter()
+            .filter(|s| matches!(s, Signal::Buy { .. }))
+            .count();
         assert!(buys > 0);
     }
 }

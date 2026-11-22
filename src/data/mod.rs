@@ -60,7 +60,11 @@ impl PriceSeries {
     }
 
     pub fn to_dataframe(&self) -> Result<DataFrame> {
-        let timestamps: Vec<i64> = self.bars.iter().map(|b| b.timestamp.timestamp_millis()).collect();
+        let timestamps: Vec<i64> = self
+            .bars
+            .iter()
+            .map(|b| b.timestamp.timestamp_millis())
+            .collect();
         let opens: Vec<f64> = self.bars.iter().map(|b| b.open).collect();
         let highs: Vec<f64> = self.bars.iter().map(|b| b.high).collect();
         let lows: Vec<f64> = self.bars.iter().map(|b| b.low).collect();
@@ -68,7 +72,8 @@ impl PriceSeries {
         let volumes: Vec<f64> = self.bars.iter().map(|b| b.volume).collect();
 
         Ok(DataFrame::new(vec![
-            Series::new("timestamp".into(), timestamps).cast(&DataType::Datetime(TimeUnit::Milliseconds, None))?,
+            Series::new("timestamp".into(), timestamps)
+                .cast(&DataType::Datetime(TimeUnit::Milliseconds, None))?,
             Series::new("open".into(), opens),
             Series::new("high".into(), highs),
             Series::new("low".into(), lows),
@@ -192,7 +197,11 @@ impl MarketData {
             }
         }
 
-        Ok(AlignedData { series: aligned, start: min_ts, end: max_ts })
+        Ok(AlignedData {
+            series: aligned,
+            start: min_ts,
+            end: max_ts,
+        })
     }
 }
 
@@ -231,11 +240,35 @@ mod tests {
     #[test]
     fn test_returns() {
         let bars = vec![
-            Bar { timestamp: Utc.timestamp_opt(0, 0).unwrap(), open: 100.0, high: 100.0, low: 100.0, close: 100.0, volume: 100.0 },
-            Bar { timestamp: Utc.timestamp_opt(3600, 0).unwrap(), open: 105.0, high: 105.0, low: 105.0, close: 105.0, volume: 100.0 },
-            Bar { timestamp: Utc.timestamp_opt(7200, 0).unwrap(), open: 99.0, high: 99.0, low: 99.0, close: 99.0, volume: 100.0 },
+            Bar {
+                timestamp: Utc.timestamp_opt(0, 0).unwrap(),
+                open: 100.0,
+                high: 100.0,
+                low: 100.0,
+                close: 100.0,
+                volume: 100.0,
+            },
+            Bar {
+                timestamp: Utc.timestamp_opt(3600, 0).unwrap(),
+                open: 105.0,
+                high: 105.0,
+                low: 105.0,
+                close: 105.0,
+                volume: 100.0,
+            },
+            Bar {
+                timestamp: Utc.timestamp_opt(7200, 0).unwrap(),
+                open: 99.0,
+                high: 99.0,
+                low: 99.0,
+                close: 99.0,
+                volume: 100.0,
+            },
         ];
-        let series = PriceSeries { symbol: "TEST".into(), bars };
+        let series = PriceSeries {
+            symbol: "TEST".into(),
+            bars,
+        };
         let rets = series.returns();
         assert_eq!(rets.len(), 2);
         assert!((rets[0] - 0.05).abs() < 1e-10);

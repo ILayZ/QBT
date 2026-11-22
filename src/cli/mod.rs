@@ -76,7 +76,10 @@ pub struct WalkForwardArgs {
     #[argh(option, default = r#"6"#)]
     pub step: u32,
     /// output path
-    #[argh(option, default = r#"std::path::PathBuf::from("walk_forward_report.html")"#)]
+    #[argh(
+        option,
+        default = r#"std::path::PathBuf::from("walk_forward_report.html")"#
+    )]
     pub output: PathBuf,
 }
 
@@ -103,7 +106,7 @@ pub struct StrategiesArgs {
 
 impl RunArgs {
     pub fn execute(&self) -> Result<()> {
-        use crate::backtest::{Backtester, BacktestConfig};
+        use crate::backtest::{BacktestConfig, Backtester};
         use crate::data::PriceSeries;
         use crate::report::HtmlReport;
         use crate::strategy::Strategy;
@@ -164,7 +167,7 @@ impl RunArgs {
 
 impl WalkForwardArgs {
     pub fn execute(&self) -> Result<()> {
-        use crate::backtest::{Backtester, BacktestConfig, WalkForwardConfig};
+        use crate::backtest::{BacktestConfig, Backtester, WalkForwardConfig};
         use crate::data::PriceSeries;
         use crate::report::HtmlReport;
         use crate::strategy::Strategy;
@@ -267,9 +270,18 @@ impl StrategiesArgs {
         let strategies = vec![
             ("DCA", "Dollar-cost averaging at fixed intervals"),
             ("MomentumSMA", "Buy when price > SMA, sell when price < SMA"),
-            ("VolAdjustedDCA", "Increase DCA amount when volatility is high"),
-            ("RegimeSwitch", "Switch positions based on market regime detection"),
-            ("Custom", "User-defined strategy (requires custom implementation)"),
+            (
+                "VolAdjustedDCA",
+                "Increase DCA amount when volatility is high",
+            ),
+            (
+                "RegimeSwitch",
+                "Switch positions based on market regime detection",
+            ),
+            (
+                "Custom",
+                "User-defined strategy (requires custom implementation)",
+            ),
         ];
 
         for (name, desc) in strategies {
@@ -277,9 +289,15 @@ impl StrategiesArgs {
             if self.verbose {
                 match name {
                     "DCA" => println!("    Parameters: interval_hours, amount"),
-                    "MomentumSMA" => println!("    Parameters: lookback, buy_threshold, sell_threshold"),
-                    "VolAdjustedDCA" => println!("    Parameters: base_amount, vol_lookback, vol_multiplier_max"),
-                    "RegimeSwitch" => println!("    Parameters: fast_sma, slow_sma, buy_regime, sell_regime"),
+                    "MomentumSMA" => {
+                        println!("    Parameters: lookback, buy_threshold, sell_threshold")
+                    }
+                    "VolAdjustedDCA" => {
+                        println!("    Parameters: base_amount, vol_lookback, vol_multiplier_max")
+                    }
+                    "RegimeSwitch" => {
+                        println!("    Parameters: fast_sma, slow_sma, buy_regime, sell_regime")
+                    }
                     _ => {}
                 }
             }
