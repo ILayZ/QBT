@@ -574,8 +574,10 @@ mod tests {
         let bt = Backtester::new(BacktestConfig::default());
         let result = bt.run(&series, &strategy).unwrap();
 
-        // Should have entered and exited
-        assert!(result.num_trades >= 2);
+        // Should have entered and exited (one completed round-trip = 1 trade)
+        // CF-019 causal execution: buy signal at bar 4 -> execute at bar 5 open (120),
+        // sell signal at bar 7 -> execute at bar 8 open (90). One buy+sell = 1 trade.
+        assert_eq!(result.num_trades, 1);
     }
 
     // CF-015: First-bar costs omitted from performance.
