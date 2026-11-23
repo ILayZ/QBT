@@ -23,9 +23,9 @@ pub enum Command {
     Strategies(StrategiesArgs),
 }
 
+/// Run a backtest on a price series
 #[derive(FromArgs)]
 #[argh(subcommand, name = "run")]
-/// Run a backtest on a price series
 pub struct RunArgs {
     /// input CSV file (OHLCV)
     #[argh(option)]
@@ -56,9 +56,9 @@ pub struct RunArgs {
     pub risk_free: f64,
 }
 
+/// Walk-forward optimization
 #[derive(FromArgs)]
 #[argh(subcommand, name = "walk-forward")]
-/// Walk-forward optimization
 pub struct WalkForwardArgs {
     /// input CSV file
     #[argh(option)]
@@ -83,9 +83,9 @@ pub struct WalkForwardArgs {
     pub output: PathBuf,
 }
 
+/// Generate an HTML report from a JSON results file
 #[derive(FromArgs)]
 #[argh(subcommand, name = "report")]
-/// Generate an HTML report from a JSON results file
 pub struct ReportArgs {
     /// input JSON file with results
     #[argh(option)]
@@ -95,9 +95,9 @@ pub struct ReportArgs {
     pub output: PathBuf,
 }
 
+/// List available strategies
 #[derive(FromArgs)]
 #[argh(subcommand, name = "strategies")]
-/// List available strategies
 pub struct StrategiesArgs {
     /// show detailed strategy parameters
     #[argh(switch)]
