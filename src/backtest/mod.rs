@@ -572,7 +572,7 @@ mod tests {
         let prices = vec![
             100.0, 101.0, 102.0, 110.0, 115.0, 120.0, 125.0, 130.0,  // uptrend
             125.0, 120.0, 115.0, 110.0, 105.0, 100.0, 95.0, 90.0,   // downtrend triggers sell
-            90.0, 90.0, 90.0, 90.0  // flat tail for execution
+            90.0, 90.0, 90.0, 90.0,  // flat tail for execution
         ];
         let series = make_series(prices);
         let strategy = Strategy::MomentumSMA {
