@@ -557,14 +557,23 @@ mod tests {
         let bt = Backtester::new(BacktestConfig::default());
         let result = bt.run(&series, &strategy).unwrap();
 
-        assert_eq!(result.num_trades, 10); // 10 buys
+        // DCA only buys (no sells), so num_trades = 0 (completed round-trips).
+        // Verify equity growth instead.
+        assert_eq!(result.num_trades, 0);
         assert!(result.final_value > result.initial_capital);
         assert!(result.total_return > 0.0);
     }
 
     #[test]
     fn test_momentum_backtest() {
-        let prices = vec![100.0, 101.0, 102.0, 110.0, 115.0, 120.0, 110.0, 100.0, 90.0];
+        // Extend series to ensure complete round-trip with causal execution:
+        // - Signal at bar i uses bar i-1 data, executes at bar i+1 open
+        // - Need enough bars for: buy signal -> buy execution -> sell signal -> sell execution
+        let prices = vec![
+            100.0, 101.0, 102.0, 110.0, 115.0, 120.0, 125.0, 130.0,  // uptrend
+            125.0, 120.0, 115.0, 110.0, 105.0, 100.0, 95.0, 90.0,   // downtrend triggers sell
+            90.0, 90.0, 90.0, 90.0  // flat tail for execution
+        ];
         let series = make_series(prices);
         let strategy = Strategy::MomentumSMA {
             lookback: 3,
@@ -575,8 +584,6 @@ mod tests {
         let result = bt.run(&series, &strategy).unwrap();
 
         // Should have entered and exited (one completed round-trip = 1 trade)
-        // CF-019 causal execution: buy signal at bar 4 -> execute at bar 5 open (120),
-        // sell signal at bar 7 -> execute at bar 8 open (90). One buy+sell = 1 trade.
         assert_eq!(result.num_trades, 1);
     }
 
