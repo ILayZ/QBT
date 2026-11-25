@@ -93,6 +93,24 @@ A ready-to-use 180-day sample dataset is included at `data/sample_btc_1h.csv`.
 | `--slippage` | `0.0005` | Slippage (fraction) |
 | `--risk-free` | `0.03` | Annual risk-free rate |
 
+Compare all four strategies on independent accounts funded once at the start:
+
+```bash
+qbacktest run --input data/sample_btc_1h.csv --strategy all --capital 1800 \
+  --order-amount 10 --daily-limit 10 --ledger orders.csv --output comparison.html
+```
+
+Each account can buy up to $10 per UTC execution day. Fees are charged on top by default.
+Use `--limit-includes-fees` to count buy fees toward the cap. Sales do not replenish
+the daily allowance. A buy that exceeds the remaining allowance is reduced, while a
+buy with insufficient cash is skipped. No cash is deposited during the simulation.
+
+`--order-amount` sizes each DCA or directional entry. For hourly VolAdjustedDCA it
+sets the baseline to 1/24 of that amount before the volatility adjustment. Without
+this flag, existing sizing defaults apply. The optional CSV journal lists executed
+and skipped orders with their signal and execution-bar timestamps, status, price,
+filled quantity, fee and remaining cash.
+
 ### `walk-forward`
 
 | Flag | Default | Description |
