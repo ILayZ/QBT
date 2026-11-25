@@ -256,7 +256,14 @@ impl Backtester {
                     } else if amount < minimum {
                         skipped_buys += 1;
                         below_minimum_buys += 1;
-                        record(event("buy", "below_min_notional", buy_price, 0.0, 0.0, cash))?;
+                        record(event(
+                            "buy",
+                            "below_min_notional",
+                            buy_price,
+                            0.0,
+                            0.0,
+                            cash,
+                        ))?;
                     } else if cash < total_cost {
                         skipped_buys += 1;
                         record(event("buy", "insufficient_cash", buy_price, 0.0, 0.0, cash))?;
@@ -290,7 +297,14 @@ impl Backtester {
                             (*amount).min(position * sell_price)
                         };
                         if notional < minimum {
-                            record(event("sell", "below_min_notional", sell_price, 0.0, 0.0, cash))?;
+                            record(event(
+                                "sell",
+                                "below_min_notional",
+                                sell_price,
+                                0.0,
+                                0.0,
+                                cash,
+                            ))?;
                         } else {
                             let qty_to_sell = notional / sell_price;
 
@@ -644,6 +658,37 @@ mod tests {
         let rejected = poor.run(&series, &strategy).unwrap();
         assert_eq!(rejected.equity_curve, vec![100.0; 4]);
         assert!(rejected.trade_log.is_empty());
+    }
+
+    #[test]
+    fn minimum_allows_exact_buy_and_preserves_position_on_small_exit() {
+        let series = make_series(vec![100.0, 120.0, 100.0, 80.0, 70.0]);
+        let strategy = Strategy::MomentumSMA {
+            lookback: 2,
+            buy_threshold: 0.01,
+            sell_threshold: 0.01,
+        };
+        let bt = Backtester::new(BacktestConfig {
+            initial_capital: 1000.0,
+            slippage: 0.0,
+            trading_fee: 0.0,
+            risk_free_rate: 0.0,
+        });
+        let budget = BuyBudget {
+            min_notional: Some(100.0),
+            ..BuyBudget::default()
+        };
+        let mut events = Vec::new();
+        let result = bt
+            .run_with_budget(&series, &strategy, &budget, |e| {
+                events.push((e.side, e.status, e.cash));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(events[0], ("buy", "filled", 900.0));
+        assert_eq!(events[1], ("sell", "below_min_notional", 900.0));
+        assert!(result.trade_log.is_empty());
+        assert_eq!(result.final_value, 970.0);
     }
 
     #[test]

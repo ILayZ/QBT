@@ -88,7 +88,10 @@ fn comparison_section(results: &[BacktestResult]) -> Result<String> {
     use plotters::prelude::*;
     use std::fmt::Write;
 
-    let dca = results.iter().find(|r| r.strategy_name == "DCA").ok_or_else(|| anyhow::anyhow!("Missing DCA baseline"))?;
+    let dca = results
+        .iter()
+        .find(|r| r.strategy_name == "DCA")
+        .ok_or_else(|| anyhow::anyhow!("Missing DCA baseline"))?;
     let mut rows = String::new();
     let mut svg = String::new();
     {
@@ -98,22 +101,48 @@ fn comparison_section(results: &[BacktestResult]) -> Result<String> {
         let low = values.clone().fold(f64::INFINITY, f64::min);
         let high = values.fold(f64::NEG_INFINITY, f64::max);
         let pad = ((high - low) * 0.05).max(0.01);
-        let mut chart = ChartBuilder::on(&area).margin(12).x_label_area_size(40).y_label_area_size(70)
-            .build_cartesian_2d(0..dca.equity_curve.len().max(2)-1, low-pad..high+pad)?;
-        chart.configure_mesh().x_desc("Hours from start").y_desc("Equity ($)").draw()?;
+        let mut chart = ChartBuilder::on(&area)
+            .margin(12)
+            .x_label_area_size(40)
+            .y_label_area_size(70)
+            .build_cartesian_2d(0..dca.equity_curve.len().max(2) - 1, low - pad..high + pad)?;
+        chart
+            .configure_mesh()
+            .x_desc("Hours from start")
+            .y_desc("Equity ($)")
+            .draw()?;
         for (i, r) in results.iter().enumerate() {
             let color = Palette99::pick(i).to_rgba();
-            chart.draw_series(LineSeries::new(r.equity_curve.iter().copied().enumerate(), color.stroke_width(2)))?
+            chart
+                .draw_series(LineSeries::new(
+                    r.equity_curve.iter().copied().enumerate(),
+                    color.stroke_width(2),
+                ))?
                 .label(r.strategy_name.as_str())
-                .legend(move |(x,y)| PathElement::new([(x,y),(x+18,y)], color.stroke_width(2)));
-            writeln!(rows, "<tr><td>{}</td><td>${:.2}</td><td>{:+.2}</td><td>{:.2}%</td><td>{:.2}%</td><td>{}</td><td>{}</td></tr>",
-                r.strategy_name, r.final_value, r.final_value-dca.final_value, r.max_drawdown*100.0,
-                r.mean_asset_weight.unwrap_or_default()*100.0, r.skipped_buys, r.below_minimum_buys)?;
+                .legend(move |(x, y)| {
+                    PathElement::new([(x, y), (x + 18, y)], color.stroke_width(2))
+                });
+            writeln!(
+                rows,
+                "<tr><td>{}</td><td>${:.2}</td><td>{:+.2}</td><td>{:.2}%</td><td>{:.2}%</td><td>{}</td><td>{}</td></tr>",
+                r.strategy_name,
+                r.final_value,
+                r.final_value - dca.final_value,
+                r.max_drawdown * 100.0,
+                r.mean_asset_weight.unwrap_or_default() * 100.0,
+                r.skipped_buys,
+                r.below_minimum_buys
+            )?;
         }
-        chart.configure_series_labels().background_style(WHITE.mix(0.85)).draw()?;
+        chart
+            .configure_series_labels()
+            .background_style(WHITE.mix(0.85))
+            .draw()?;
         area.present()?;
     }
-    Ok(format!("<section class=\"report-section\"><h2>Strategy comparison</h2><style>svg{{max-width:100%;height:auto}}</style>{svg}<table><thead><tr><th>Portfolio</th><th>Final equity</th><th>vs DCA ($)</th><th>Max drawdown</th><th>Mean asset weight</th><th>Skipped buys</th><th>Below minimum buys</th></tr></thead><tbody>{rows}</tbody></table></section>"))
+    Ok(format!(
+        "<section class=\"report-section\"><h2>Strategy comparison</h2><style>svg{{max-width:100%;height:auto}}</style>{svg}<table><thead><tr><th>Portfolio</th><th>Final equity</th><th>vs DCA ($)</th><th>Max drawdown</th><th>Mean asset weight</th><th>Skipped buys</th><th>Below minimum buys</th></tr></thead><tbody>{rows}</tbody></table></section>"
+    ))
 }
 
 #[cfg(test)]
