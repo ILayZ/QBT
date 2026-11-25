@@ -46,6 +46,8 @@ def check(data, journal, report, include_fees):
         if name == "DCA" and not include_fees:
             assert buys == 179 and round(fees, 2) == 1.79
             assert round(cash, 2) == 8.21 and displayed == 1875.49
+        if name == "DCA" and include_fees:
+            assert buys == 180 and abs(cash) < 1e-8
         print(f"{name}: buys={buys} fees={fees:.2f} cash={cash:.2f} final={displayed:.2f}")
 
 

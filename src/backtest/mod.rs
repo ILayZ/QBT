@@ -232,7 +232,12 @@ impl Backtester {
                     let remaining = budget.daily_limit.unwrap_or(f64::INFINITY) - spent;
                     let amount = requested.min(remaining / fee_factor);
                     let fee = amount * self.config.trading_fee;
-                    let total_cost = amount + fee;
+                    // A fee-inclusive cap can round a debit a few ulps above the allowance.
+                    let total_cost = if budget.include_fees {
+                        (amount * fee_factor).min(remaining)
+                    } else {
+                        amount + fee
+                    };
 
                     if amount <= 0.0 {
                         record(event("buy", "daily_limit", buy_price, 0.0, 0.0, cash))?;
