@@ -131,8 +131,14 @@ impl Backtester {
         budget: &BuyBudget,
         mut record: impl FnMut(OrderEvent) -> Result<()>,
     ) -> Result<BacktestResult> {
-        for value in [budget.daily_limit, budget.entry_amount].into_iter().flatten() {
-            anyhow::ensure!(value.is_finite() && value > 0.0, "Budget must be finite and positive");
+        for value in [budget.daily_limit, budget.entry_amount]
+            .into_iter()
+            .flatten()
+        {
+            anyhow::ensure!(
+                value.is_finite() && value > 0.0,
+                "Budget must be finite and positive"
+            );
         }
         // CF-017: Validate nonempty data and finite, economically valid inputs at engine boundary
         if series.is_empty() {

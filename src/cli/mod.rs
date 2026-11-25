@@ -116,18 +116,33 @@ pub struct StrategiesArgs {
     pub verbose: bool,
 }
 
-fn builtin_strategy(name: &str, interval: u32, amount: f64, vol_base: f64) -> Result<crate::strategy::Strategy> {
+fn builtin_strategy(
+    name: &str,
+    interval: u32,
+    amount: f64,
+    vol_base: f64,
+) -> Result<crate::strategy::Strategy> {
     use crate::strategy::{Regime, Strategy};
     Ok(match name.to_ascii_uppercase().as_str() {
-        "DCA" => Strategy::DCA { interval_hours: interval, amount },
+        "DCA" => Strategy::DCA {
+            interval_hours: interval,
+            amount,
+        },
         "MOMENTUMSMA" => Strategy::MomentumSMA {
-            lookback: 20, buy_threshold: 0.01, sell_threshold: 0.01,
+            lookback: 20,
+            buy_threshold: 0.01,
+            sell_threshold: 0.01,
         },
         "VOLDCA" | "VOLADJUSTEDDCA" => Strategy::VolAdjustedDCA {
-            base_amount: vol_base, vol_lookback: 30, vol_multiplier_max: 2.0,
+            base_amount: vol_base,
+            vol_lookback: 30,
+            vol_multiplier_max: 2.0,
         },
         "REGIMESWITCH" => Strategy::RegimeSwitch {
-            fast_sma: 10, slow_sma: 50, buy_regime: Regime::Bull, sell_regime: Regime::Bear,
+            fast_sma: 10,
+            slow_sma: 50,
+            buy_regime: Regime::Bull,
+            sell_regime: Regime::Bear,
         },
         _ => anyhow::bail!("Unknown strategy: {}", name),
     })
@@ -135,10 +150,10 @@ fn builtin_strategy(name: &str, interval: u32, amount: f64, vol_base: f64) -> Re
 
 impl RunArgs {
     pub fn execute(&self) -> Result<()> {
+        use crate::backtest::BuyBudget;
         use crate::backtest::{BacktestConfig, Backtester};
         use crate::data::PriceSeries;
         use crate::report::HtmlReport;
-        use crate::backtest::BuyBudget;
         use std::io::{BufWriter, Write};
 
         // CF-017: Validate positive intervals and parameters at CLI boundary
@@ -163,9 +178,15 @@ impl RunArgs {
             vec![self.strategy.as_str()]
         };
         let amount = self.order_amount.unwrap_or(self.dca_amount);
-        anyhow::ensure!(amount.is_finite() && amount > 0.0, "Order amount must be positive and finite");
+        anyhow::ensure!(
+            amount.is_finite() && amount > 0.0,
+            "Order amount must be positive and finite"
+        );
         let vol_base = self.order_amount.map_or(self.dca_amount, |v| v / 24.0);
-        let strategies = names.iter().map(|name| builtin_strategy(name, self.dca_interval, amount, vol_base)).collect::<Result<Vec<_>>>()?;
+        let strategies = names
+            .iter()
+            .map(|name| builtin_strategy(name, self.dca_interval, amount, vol_base))
+            .collect::<Result<Vec<_>>>()?;
         let budget = BuyBudget {
             daily_limit: self.daily_limit,
             include_fees: self.limit_includes_fees,
@@ -178,16 +199,39 @@ impl RunArgs {
             risk_free_rate: self.risk_free,
         };
         let bt = Backtester::new(config);
-        anyhow::ensure!(self.ledger.as_ref() != Some(&self.output) && self.ledger.as_ref() != Some(&self.input), "Choose a separate ledger path");
-        let mut ledger = self.ledger.as_ref().map(std::fs::File::create).transpose()?.map(BufWriter::new);
+        anyhow::ensure!(
+            self.ledger.as_ref() != Some(&self.output) && self.ledger.as_ref() != Some(&self.input),
+            "Choose a separate ledger path"
+        );
+        let mut ledger = self
+            .ledger
+            .as_ref()
+            .map(std::fs::File::create)
+            .transpose()?
+            .map(BufWriter::new);
         if let Some(w) = &mut ledger {
-            writeln!(w, "strategy,signal_time,execution_time,side,status,price,quantity,fee,cash")?;
+            writeln!(
+                w,
+                "strategy,signal_time,execution_time,side,status,price,quantity,fee,cash"
+            )?;
         }
         let mut results = Vec::new();
         for strategy in strategies {
             let result = bt.run_with_budget(&series, &strategy, &budget, |e| {
                 if let Some(w) = &mut ledger {
-                    writeln!(w, "{},{},{},{},{},{},{},{},{}", strategy.name(), e.signal_time.to_rfc3339(), e.execution_time.to_rfc3339(), e.side, e.status, e.price, e.quantity, e.fee, e.cash)?;
+                    writeln!(
+                        w,
+                        "{},{},{},{},{},{},{},{},{}",
+                        strategy.name(),
+                        e.signal_time.to_rfc3339(),
+                        e.execution_time.to_rfc3339(),
+                        e.side,
+                        e.status,
+                        e.price,
+                        e.quantity,
+                        e.fee,
+                        e.cash
+                    )?;
                 }
                 Ok(())
             })?;
