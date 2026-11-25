@@ -1,9 +1,9 @@
 use crate::data::PriceSeries;
+use crate::metrics::PerformanceMetrics;
 use crate::strategy::{Signal, Strategy};
 use anyhow::Result;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use tracing::{info, instrument};
 
 /// A single buy lot with cost basis including fees (for FIFO P&L)
@@ -63,7 +63,7 @@ impl Default for BacktestConfig {
     }
 }
 
-/// Walk-forward optimizer
+/// Fixed-parameter window evaluation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalkForwardConfig {
     pub train_months: u32,
@@ -85,6 +85,7 @@ impl Default for WalkForwardConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalkForwardResult {
     pub out_of_sample_results: Vec<BacktestResult>,
+    /// Arithmetic mean of independent window returns (legacy field name).
     pub total_oos_return: f64,
     pub avg_oos_sharpe: f64,
     pub consistency: f64, // % of OOS periods with positive return
@@ -145,38 +146,23 @@ impl Backtester {
             "Starting backtest"
         );
 
+        series.validate_hourly()?;
         let signals = strategy.generate_signals(series);
-        let closes = series.closes();
-        let opens = series.opens();
-
+        let single_position = matches!(
+            strategy,
+            Strategy::MomentumSMA { .. } | Strategy::RegimeSwitch { .. }
+        );
         let mut cash = self.config.initial_capital;
-        let mut lots: Vec<Lot> = Vec::new(); // FIFO lot queue
-        let mut equity_curve: VecDeque<f64> = VecDeque::new();
-        let mut trades: Vec<Trade> = Vec::new();
-        let mut _gross_profit = 0.0;
-        let mut _gross_loss = 0.0;
-        let mut _winning_trades = 0;
+        let mut lots: Vec<Lot> = Vec::new();
+        let mut equity = vec![cash];
+        let mut trades = Vec::new();
 
-        // CF-019: Causal execution model
-        // Signals are generated using data available at bar close.
-        // Execution happens at the NEXT bar's open (or close if open unavailable).
-        // This avoids look-ahead bias: you cannot know bar i's close before it closes,
-        // and you cannot execute at bar i's close in the same instant.
-        for (i, signal) in signals.iter().enumerate() {
-            // Execution price: next bar's open (causal), or current close for the last bar
-            let exec_price = if i + 1 < opens.len() {
-                opens[i + 1]
-            } else {
-                closes[i]
-            };
-            let exec_ts = if i + 1 < series.bars.len() {
-                series.bars[i + 1].timestamp
-            } else {
-                series.bars[i].timestamp
-            };
-
+        // A close signal can only fill at the following open. Mark each bar at its close.
+        for (signal, bar) in signals.iter().zip(series.bars.iter().skip(1)) {
+            let exec_price = bar.open;
+            let exec_ts = bar.timestamp;
             match signal {
-                Signal::Buy { amount } => {
+                Signal::Buy { amount } if !single_position || lots.is_empty() => {
                     let buy_price = exec_price * (1.0 + self.config.slippage);
                     let fee = *amount * self.config.trading_fee;
                     let total_cost = *amount + fee;
@@ -191,9 +177,6 @@ impl Backtester {
                             cost_per_unit,
                             entry_time: exec_ts,
                         });
-
-                        // Close pending short (if any) — unchanged from prior behavior
-                        // Note: short logic was incomplete; keeping minimal for compatibility
                     }
                 }
                 Signal::Sell { amount } => {
@@ -211,7 +194,6 @@ impl Backtester {
 
                         // FIFO lot consumption
                         let mut remaining_to_sell = qty_to_sell;
-                        let mut _realized_pnl = 0.0;
                         let mut consumed_lots: Vec<Lot> = Vec::new();
 
                         for lot in lots.drain(..) {
@@ -225,15 +207,6 @@ impl Backtester {
                             let exit_fee_per_unit = sell_price * self.config.trading_fee;
                             let net_sell_per_unit = sell_price - exit_fee_per_unit;
                             let pnl = (net_sell_per_unit - lot.cost_per_unit) * take;
-                            _realized_pnl += pnl;
-
-                            if pnl > 0.0 {
-                                _gross_profit += pnl;
-                                _winning_trades += 1;
-                            } else {
-                                _gross_loss += -pnl;
-                            }
-
                             trades.push(Trade {
                                 entry_time: lot.entry_time,
                                 exit_time: Some(exec_ts),
@@ -261,27 +234,14 @@ impl Backtester {
                         cash += proceeds - fee;
                     }
                 }
-                Signal::Hold => {}
+                Signal::Buy { .. } | Signal::Hold => {}
             }
 
             let position_qty: f64 = lots.iter().map(|l| l.quantity).sum();
-            let equity = cash + position_qty * exec_price;
-            equity_curve.push_back(equity);
+            equity.push(cash + position_qty * bar.close);
         }
 
-        // Mark-to-market final value
-        let position_qty: f64 = lots.iter().map(|l| l.quantity).sum();
-        let _final_value = cash + position_qty * closes[closes.len() - 1];
-
-        // Calculate metrics
-        let equity_vec: Vec<f64> = equity_curve.into();
-        let mut metrics = calculate_metrics(
-            &equity_vec,
-            &trades,
-            self.config.risk_free_rate,
-            series.len(),
-            self.config.initial_capital,
-        );
+        let mut metrics = calculate_metrics(&equity, &trades, self.config.risk_free_rate);
         metrics.strategy_name = strategy.name().to_string();
 
         info!(
@@ -330,6 +290,7 @@ impl Backtester {
             "Starting walk-forward analysis"
         );
 
+        series.validate_hourly()?;
         let total_bars = series.len();
         let bar_per_day = 24usize; // assume hourly bars
         let train_bars = (wf_config.train_months as usize) * 30 * bar_per_day;
@@ -349,7 +310,7 @@ impl Backtester {
             let train_end = start + train_bars;
             let test_end = start + train_bars + test_bars;
 
-            // Train: find best params (placeholder: just use factory)
+            // Resolve the strategy for this window before evaluating it.
             let strategy = strategy_factory(train_end as u32, test_end as u32);
 
             // Test: run OOS on the test window [train_end, test_end)
@@ -392,130 +353,25 @@ impl Backtester {
     }
 }
 
-fn calculate_metrics(
-    equity: &[f64],
-    trades: &[Trade],
-    risk_free_rate: f64,
-    num_bars: usize,
-    initial_capital: f64,
-) -> BacktestResult {
-    // Total return: use configured initial capital, not first post-trade equity
-    let initial = initial_capital;
-    let final_value = equity.last().copied().unwrap_or(initial);
-    let total_return = (final_value - initial) / initial;
-
-    // CAGR (assuming hourly bars, 365 days)
-    let hours_per_year: f64 = 24.0 * 365.0;
-    let years = num_bars as f64 / hours_per_year;
-    let cagr = if years > 0.0 {
-        (final_value / initial).powf(1.0 / years) - 1.0
-    } else {
-        0.0
-    };
-
-    // Sharpe ratio
-    let returns: Vec<f64> = equity.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
-    let mean_ret = returns.iter().sum::<f64>() / returns.len() as f64;
-    let std_ret = {
-        let variance = returns.iter().map(|r| (r - mean_ret).powi(2)).sum::<f64>()
-            / (returns.len() - 1) as f64;
-        variance.sqrt()
-    };
-    let bars_per_year: f64 = 24.0 * 365.0;
-    let sharpe_ratio = if std_ret > 0.0 {
-        ((mean_ret - risk_free_rate / bars_per_year) / std_ret) * (bars_per_year).sqrt()
-    } else {
-        0.0
-    };
-
-    // Sortino ratio
-    let downside_dev: Vec<f64> = returns
-        .iter()
-        .filter_map(|r| if *r < 0.0 { Some((-r).powi(2)) } else { None })
-        .collect();
-    let downside_std = if downside_dev.is_empty() {
-        0.0
-    } else {
-        let downside_var = downside_dev.iter().sum::<f64>() / (returns.len()) as f64;
-        downside_var.sqrt()
-    };
-    let sortino_ratio = if downside_std > 0.0 {
-        ((mean_ret - risk_free_rate / bars_per_year) / downside_std) * (bars_per_year).sqrt()
-    } else {
-        f64::INFINITY
-    };
-
-    // Max drawdown: include pre-trade initial capital as starting peak
-    let mut peak = initial_capital;
-    let mut max_dd = 0.0;
-    for &val in equity.iter() {
-        if val > peak {
-            peak = val;
-        }
-        let dd = (peak - val) / peak;
-        if dd > max_dd {
-            max_dd = dd;
-        }
-    }
-
-    // Ulcer index: include pre-trade initial capital
-    let dd_values: Vec<f64> = {
-        let mut peak = initial_capital;
-        equity
-            .iter()
-            .map(|&val| {
-                if val > peak {
-                    peak = val;
-                }
-                (peak - val) / peak
-            })
-            .collect()
-    };
-    let ulcer_index = dd_values.iter().map(|d| d * d).sum::<f64>() / dd_values.len() as f64;
-    let ulcer_index = (ulcer_index * 100.0).sqrt();
-
-    // Trade metrics
-    let num_trades = trades.len();
-    let gross_profit: f64 = trades
-        .iter()
-        .filter_map(|t| t.pnl)
-        .filter(|p| *p > 0.0)
-        .sum();
-    let gross_loss: f64 = trades
-        .iter()
-        .filter_map(|t| t.pnl)
-        .filter(|p| *p < 0.0)
-        .map(|p| -p)
-        .sum();
-    let winning_trades = trades
-        .iter()
-        .filter_map(|t| t.pnl)
-        .filter(|p| *p > 0.0)
-        .count();
-    let win_rate = if num_trades > 0 {
-        winning_trades as f64 / num_trades as f64
-    } else {
-        0.0
-    };
-    let profit_factor = if gross_loss > 0.0 {
-        gross_profit / gross_loss
-    } else {
-        f64::INFINITY
-    };
+fn calculate_metrics(equity: &[f64], trades: &[Trade], risk_free_rate: f64) -> BacktestResult {
+    let returns: Vec<_> = equity.windows(2).map(|w| w[1] / w[0] - 1.0).collect();
+    let pnls: Vec<_> = trades.iter().filter_map(|t| t.pnl).collect();
+    let metrics =
+        PerformanceMetrics::calculate(equity, &returns, risk_free_rate, 8760.0, &[], &pnls);
 
     BacktestResult {
-        strategy_name: String::new(), // set by caller
-        initial_capital,
-        final_value,
-        total_return,
-        cagr,
-        sharpe_ratio,
-        sortino_ratio,
-        max_drawdown: max_dd,
-        ulcer_index,
-        win_rate,
-        profit_factor,
-        num_trades,
+        strategy_name: String::new(),
+        initial_capital: equity[0],
+        final_value: *equity.last().unwrap(),
+        total_return: metrics.total_return,
+        cagr: metrics.cagr,
+        sharpe_ratio: metrics.sharpe_ratio,
+        sortino_ratio: metrics.sortino_ratio,
+        max_drawdown: metrics.max_drawdown,
+        ulcer_index: metrics.ulcer_index,
+        win_rate: metrics.win_rate,
+        profit_factor: metrics.profit_factor,
+        num_trades: metrics.num_trades,
         equity_curve: equity.to_vec(),
         trade_log: trades.to_vec(),
     }
@@ -532,7 +388,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, p)| Bar {
-                timestamp: Utc.timestamp_opt(i as i64, 0).unwrap(),
+                timestamp: Utc.timestamp_opt(i as i64 * 3600, 0).unwrap(),
                 open: *p,
                 high: *p,
                 low: *p,
@@ -567,7 +423,7 @@ mod tests {
     #[test]
     fn test_momentum_backtest() {
         // Extend series to ensure complete round-trip with causal execution:
-        // - Signal at bar i uses bar i-1 data, executes at bar i+1 open
+        // - Signal at bar i uses bar i close, executes at bar i+1 open
         // - Need enough bars for: buy signal -> buy execution -> sell signal -> sell execution
         let prices = vec![
             100.0, 101.0, 102.0, 110.0, 115.0, 120.0, 125.0, 130.0, // uptrend
@@ -626,118 +482,64 @@ mod tests {
         );
     }
 
-    // CF-018: Trade P&L cost basis and fees.
-    // Test: Run a round-trip backtest and verify FIFO lot tracking + fee allocation:
-    // sum(trade P&L) == final_value - initial_capital (when position fully closed).
     #[test]
-    fn test_cf018_fifo_lot_tracking_with_fees() {
-        let config = BacktestConfig {
-            initial_capital: 1000.0,
-            trading_fee: 0.1,
-            slippage: 0.0,
-            risk_free_rate: 0.03,
-        };
-        let bt = Backtester::new(config.clone());
-
-        // Price series: up then down to trigger MomentumSMA round-trip
-        let prices = vec![100.0, 110.0, 120.0, 110.0, 100.0, 90.0];
-        let series = make_series(prices);
-
+    fn fills_at_next_open_and_reconciles_net_pnl() {
+        let mut series = make_series(vec![100.0, 120.0, 125.0, 80.0, 90.0]);
+        series.bars[2].open = 100.0;
+        series.bars[2].low = 100.0;
+        series.bars[4].open = 110.0;
+        series.bars[4].high = 110.0;
         let strategy = Strategy::MomentumSMA {
             lookback: 2,
-            buy_threshold: 0.05,
-            sell_threshold: 0.05,
-        };
-        let result = bt.run(&series, &strategy).unwrap();
-
-        // Verify reconciliation: when position fully closed, sum(trade.pnl) == equity change
-        let open_trades = result
-            .trade_log
-            .iter()
-            .filter(|t| t.exit_time.is_none())
-            .count();
-        if open_trades == 0 && result.num_trades > 0 {
-            let sum_pnl: f64 = result.trade_log.iter().filter_map(|t| t.pnl).sum();
-            let equity_change = result.final_value - result.initial_capital;
-            assert!(
-                (sum_pnl - equity_change).abs() < 1e-6,
-                "CF-018 reconciliation failed: sum_pnl={}, equity_change={}, diff={}",
-                sum_pnl,
-                equity_change,
-                sum_pnl - equity_change
-            );
-        }
-    }
-
-    // CF-019: Same-close execution needs explicit causal model.
-    // Synthetic jump test: create a price series with a known gap and verify
-    // signals use prior-bar data, execution uses next-bar open (not same-bar close).
-    // Series: flat at 100, then jump to 200 at bar 5.
-    // MomentumSMA lookback=3, buy_threshold=0.01.
-    // Bar 4: close=100, SMA≈100, ratio=1.0 -> no buy
-    // Bar 5: close=200, but signal at bar 5 uses bar 4 data (close=100, SMA≈100) -> no buy
-    // Bar 6: signal uses bar 5 data (close=200, SMA≈133.3) -> buy signal generated
-    // Execution at bar 6 uses bar 7 open (if exists) or bar 6 close.
-    // This verifies NO look-ahead: the jump at bar 5 cannot trigger a fill at bar 5.
-    #[test]
-    fn test_cf019_causal_execution_synthetic_jump() {
-        let config = BacktestConfig {
-            initial_capital: 1000.0,
-            trading_fee: 0.0,
-            slippage: 0.0,
-            risk_free_rate: 0.03,
-        };
-        let bt = Backtester::new(config);
-
-        // 10 bars flat at 100, then jump to 200 for 5 bars, then flat
-        let mut prices = vec![100.0; 10];
-        prices.extend(vec![200.0; 5]);
-        prices.extend(vec![200.0; 5]);
-        let series = make_series(prices);
-
-        let strategy = Strategy::MomentumSMA {
-            lookback: 3,
             buy_threshold: 0.01,
             sell_threshold: 0.01,
         };
+        let bt = Backtester::new(BacktestConfig {
+            initial_capital: 1000.0,
+            trading_fee: 0.01,
+            slippage: 0.0,
+            risk_free_rate: 0.0,
+        });
         let result = bt.run(&series, &strategy).unwrap();
+        assert_eq!(result.trade_log.len(), 1);
+        let trade = &result.trade_log[0];
+        assert_eq!(trade.entry_time, series.bars[2].timestamp);
+        assert_eq!(trade.exit_time, Some(series.bars[4].timestamp));
+        assert_eq!(trade.quantity, 1.0);
+        assert_eq!(trade.entry_price, 101.0);
+        assert!((trade.exit_price.unwrap() - 108.9).abs() < 1e-9);
+        assert!((trade.pnl.unwrap() - 7.9).abs() < 1e-9);
+        assert!((result.final_value - 1007.9).abs() < 1e-9);
+        assert_eq!(&result.equity_curve[..4], &[1000.0, 1000.0, 1024.0, 979.0]);
 
-        // With causal model (prior-bar signal, next-bar open execution):
-        // - Bar 3 (i=3): first valid SMA (bars 1,2,3 avg=100), price=100 -> no buy
-        // - Bar 4 (i=4): SMA bars 2,3,4=100, price=100 -> no buy
-        // - Bar 5 (i=5): SMA bars 3,4,5=100, price=100 -> no buy (uses bar 4 close=100)
-        // - Bar 6 (i=6): SMA bars 4,5,6 ≈ 133.3, price=200 (bar 5 close) -> BUY signal
-        //   Execution at bar 7 open = 200
-        // - Bar 7-...: in position, no sell until price drops below SMA*(1-sell_threshold)
+        // Truncating before the sell fill leaves the position marked at the last close.
+        series.bars.pop();
+        let prefix = bt.run(&series, &strategy).unwrap();
+        assert_eq!(prefix.equity_curve, result.equity_curve[..4]);
+        assert!(prefix.trade_log.is_empty());
 
-        // Key assertion: NO trade should have entry_time at bar 5 (the jump bar)
-        // because signal at bar 5 uses bar 4 data (pre-jump)
-        let jump_bar_idx = 5; // 0-indexed: bar 5 is first 200 close
-        let trades_at_jump = result
-            .trade_log
-            .iter()
-            .filter(|t| t.entry_time == series.bars[jump_bar_idx].timestamp)
-            .count();
-        assert_eq!(
-            trades_at_jump, 0,
-            "Causal violation: trade entered at jump bar using same-bar close"
-        );
+        let poor = Backtester::new(BacktestConfig {
+            initial_capital: 100.0,
+            ..bt.config
+        });
+        let rejected = poor.run(&series, &strategy).unwrap();
+        assert_eq!(rejected.equity_curve, vec![100.0; 4]);
+        assert!(rejected.trade_log.is_empty());
+    }
 
-        // First buy should be at bar 7 (execution) or later
-        // Bar 6 signal -> execution at bar 7 open
-        if result.num_trades > 0 {
-            let first_entry_time = result.trade_log[0].entry_time;
-            let expected_first_exec_time = series.bars[7].timestamp; // bar 7 open = bar 6 signal execution
-            assert_eq!(
-                first_entry_time, expected_first_exec_time,
-                "First trade should execute at bar 7 open (causal), got {:?}",
-                first_entry_time
-            );
-        }
-
-        // Verify signal generation uses prior-bar: the jump at bar 5 should NOT produce a signal at bar 5
-        // (Signal at bar 5 uses bar 4 close=100, SMA≈100, ratio=1.0 < 1.01)
-        // First valid signal should be at bar 6 (using bar 5 close=200)
-        // This is implicitly tested by the entry_time check above
+    #[test]
+    fn refuses_irregular_bars_and_accepts_one_bar() {
+        let mut series = make_series(vec![100.0; 3]);
+        let bt = Backtester::default();
+        let strategy = Strategy::DCA {
+            interval_hours: 1,
+            amount: 100.0,
+        };
+        series.bars.remove(1);
+        assert!(bt.run(&series, &strategy).is_err());
+        series.bars.pop();
+        let result = bt.run(&series, &strategy).unwrap();
+        assert_eq!(result.final_value, bt.config.initial_capital);
+        assert_eq!(result.total_return, 0.0);
     }
 }

@@ -36,7 +36,7 @@ impl PerformanceMetrics {
             .last()
             .map(|e| e / equity.first().unwrap_or(&1.0) - 1.0)
             .unwrap_or(0.0);
-        let years = equity.len() as f64 / bars_per_year;
+        let years = equity.len().saturating_sub(1) as f64 / bars_per_year;
         let cagr = if years > 0.0 && equity.first().map(|e| *e > 0.0).unwrap_or(false) {
             (equity.last().unwrap() / equity.first().unwrap()).powf(1.0 / years) - 1.0
         } else {
@@ -44,9 +44,9 @@ impl PerformanceMetrics {
         };
 
         // Volatility
-        let mean_ret = returns.iter().sum::<f64>() / returns.len() as f64;
+        let mean_ret = returns.iter().sum::<f64>() / returns.len().max(1) as f64;
         let variance = returns.iter().map(|r| (r - mean_ret).powi(2)).sum::<f64>()
-            / (returns.len() - 1) as f64;
+            / returns.len().saturating_sub(1).max(1) as f64;
         let volatility = variance.sqrt() * (bars_per_year).sqrt();
 
         // Sharpe
@@ -76,7 +76,7 @@ impl PerformanceMetrics {
         };
 
         // Max drawdown
-        let mut peak = equity[0];
+        let mut peak = equity.first().copied().unwrap_or(0.0);
         let mut max_dd = 0.0;
         for &val in equity.iter() {
             if val > peak {
@@ -97,7 +97,7 @@ impl PerformanceMetrics {
 
         // Ulcer index
         let dd_values: Vec<f64> = {
-            let mut peak = equity[0];
+            let mut peak = equity.first().copied().unwrap_or(0.0);
             equity
                 .iter()
                 .map(|&val| {
@@ -108,8 +108,9 @@ impl PerformanceMetrics {
                 })
                 .collect()
         };
-        let ulcer_index =
-            (dd_values.iter().map(|d| d * d).sum::<f64>() / dd_values.len() as f64 * 100.0).sqrt();
+        let mean_square_drawdown =
+            dd_values.iter().map(|d| d * d).sum::<f64>() / dd_values.len().max(1) as f64;
+        let ulcer_index = mean_square_drawdown.sqrt() * 100.0;
 
         // Trade stats
         let wins: Vec<f64> = trade_pnls.iter().filter(|p| **p > 0.0).copied().collect();

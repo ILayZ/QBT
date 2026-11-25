@@ -102,4 +102,4 @@ jobs:
       - name: Run E2E script
         run: |
           chmod +x scripts/e2e_verify.sh
-          ./scripts/e2e_verify.sh || true
+          ./scripts/e2e_verify.sh

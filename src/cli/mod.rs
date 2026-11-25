@@ -15,7 +15,7 @@ pub struct Cli {
 pub enum Command {
     /// Run a backtest on a price series
     Run(RunArgs),
-    /// Walk-forward optimization
+    /// Evaluate fixed parameters across independent time windows
     WalkForward(WalkForwardArgs),
     /// Generate HTML report
     Report(ReportArgs),
@@ -56,7 +56,7 @@ pub struct RunArgs {
     pub risk_free: f64,
 }
 
-/// Walk-forward optimization
+/// Evaluate fixed parameters across independent time windows
 #[derive(FromArgs)]
 #[argh(subcommand, name = "walk-forward")]
 pub struct WalkForwardArgs {
@@ -66,7 +66,7 @@ pub struct WalkForwardArgs {
     /// strategy name
     #[argh(option, default = r#""MomentumSMA".to_string()"#)]
     pub strategy: String,
-    /// train months
+    /// history offset in 30-day months
     #[argh(option, default = r#"12"#)]
     pub train: u32,
     /// test months
@@ -137,7 +137,7 @@ impl RunArgs {
                 buy_threshold: 0.01,
                 sell_threshold: 0.01,
             },
-            "VOLDCA" => Strategy::VolAdjustedDCA {
+            "VOLDCA" | "VOLADJUSTEDDCA" => Strategy::VolAdjustedDCA {
                 base_amount: self.dca_amount,
                 vol_lookback: 30,
                 vol_multiplier_max: 2.0,
@@ -187,7 +187,7 @@ impl WalkForwardArgs {
 
         // Validate strategy name early with clear error
         match strategy_name.as_str() {
-            "DCA" | "MOMENTUMSMA" | "VOLDCA" | "REGIMESWITCH" => {}
+            "DCA" | "MOMENTUMSMA" | "VOLDCA" | "VOLADJUSTEDDCA" | "REGIMESWITCH" => {}
             _ => anyhow::bail!(
                 "Unknown strategy for walk-forward: {}. Supported: DCA, MomentumSMA, VolAdjustedDCA, RegimeSwitch",
                 self.strategy
@@ -205,7 +205,7 @@ impl WalkForwardArgs {
                     buy_threshold: 0.01,
                     sell_threshold: 0.01,
                 },
-                "VOLDCA" => Strategy::VolAdjustedDCA {
+                "VOLDCA" | "VOLADJUSTEDDCA" => Strategy::VolAdjustedDCA {
                     base_amount: 100.0,
                     vol_lookback: 30,
                     vol_multiplier_max: 2.0,
