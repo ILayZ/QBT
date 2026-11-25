@@ -103,3 +103,14 @@ jobs:
         run: |
           chmod +x scripts/e2e_verify.sh
           ./scripts/e2e_verify.sh
+
+      - name: Save sample comparison report and order journal
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-comparison-min-1
+          path: |
+            .e2e/min.html
+            .e2e/min.csv
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
