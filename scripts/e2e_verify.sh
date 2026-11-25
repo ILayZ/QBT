@@ -61,5 +61,22 @@ if [[ -x "$BIN" ]]; then
   fi
 fi
 
+# One $100 buy at the second open ($50), $1 fee, final close $55:
+# $899 in cash + 2 units * $55 = $1009.
+if [[ -x "$BIN" ]]; then
+  cat > "$OUT_DIR/reference.csv" <<'CSV'
+timestamp,open,high,low,close,volume
+2024-01-01T00:00:00Z,40.0,40.0,40.0,40.0,1.0
+2024-01-01T01:00:00Z,50.0,55.0,50.0,55.0,1.0
+CSV
+  if "$BIN" run --input "$OUT_DIR/reference.csv" --strategy DCA --dca-interval 1 \
+      --capital 1000 --dca-amount 100 --fee 0.01 --slippage 0 --output "$OUT_DIR/reference.html" &&
+      grep -Fq 'Final Value</b></td><td>$1009.00</td>' "$OUT_DIR/reference.html"; then
+    ok "reference DCA final value"
+  else
+    bad "reference DCA final value"
+  fi
+fi
+
 echo "== RESULT: $pass passed, $fail failed =="
 [[ "$fail" -eq 0 ]] && exit 0 || exit 1

@@ -21,7 +21,7 @@ Fast, reproducible, and yours.
 - **Single static binary** — no runtime, no package manager, no virtualenv.
 - **Real backtesting** — configurable initial capital, trading fee, slippage, risk-free rate.
 - **Built-in strategies:** DCA (dollar-cost averaging), MomentumSMA, VolAdjustedDCA.
-- **Walk-forward optimization** — train/test splits with out-of-sample consistency scoring.
+- **Windowed evaluation** — each test window starts with fresh capital and indicators. The CLI uses fixed parameters. It reports mean window return and the fraction of profitable windows.
 - **Metrics:** total/annualized return, Sharpe, Sortino, max drawdown, win rate, profit factor, volatility.
 - **HTML report** — self-contained, shareable, with charts.
 - **Fast** — Rust + Polars; handles large datasets without notebooks.
@@ -57,7 +57,7 @@ qbacktest run \
 qbacktest walk-forward \
   --input data/sample_btc_1h.csv \
   --strategy MomentumSMA \
-  --train 12 --test 6 --step 6 \
+  --train 1 --test 1 --step 1 \
   --output wf_report.html
 ```
 
@@ -70,7 +70,8 @@ timestamp,open,high,low,close,volume
 2024-01-01T00:00:00Z,42000.00,42014.52,41968.55,41977.89,1280.79
 ```
 
-- `timestamp`: ISO 8601 UTC datetime.
+- `timestamp`: ISO 8601 UTC datetime. Backtests require consecutive hourly bars in chronological order.
+- A signal uses the current close and fills at the following open when funds and position allow. Equity is valued at each close. The final close signal expires.
 - `open`, `high`, `low`, `close`, `volume`: floating point values.
 - Parquet is also supported (same column names; `timestamp` as datetime).
 
@@ -97,8 +98,8 @@ A ready-to-use 180-day sample dataset is included at `data/sample_btc_1h.csv`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--input` | *(required)* | Input CSV/Parquet |
-| `--strategy` | `MomentumSMA` | Strategy to optimize |
-| `--train` | `12` | Train window (months) |
+| `--strategy` | `MomentumSMA` | Fixed strategy to evaluate |
+| `--train` | `12` | History offset (30-day months) |
 | `--test` | `6` | Test window (months) |
 | `--step` | `6` | Step (months) |
 | `--output` | `walk_forward_report.html` | Output HTML |

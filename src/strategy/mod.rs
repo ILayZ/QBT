@@ -67,7 +67,7 @@ impl Signal {
 
 /// Sentinel amount meaning "sell the entire position" (full exit).
 /// The backtester treats any Sell amount >= f64::MAX / 2 as a full-position exit.
-pub const SELL_ALL: f64 = f64::MAX / 4.0;
+pub const SELL_ALL: f64 = f64::MAX;
 
 /// Strategy trait (for future extensibility)
 pub trait StrategyEngine: Send + Sync {
@@ -169,22 +169,13 @@ impl Strategy {
             } => {
                 let sma_vals = sma(&closes, *lookback as usize);
                 let mut signals = Vec::with_capacity(closes.len());
-                let mut in_position = false;
                 for i in 0..closes.len() {
-                    if i < *lookback as usize {
-                        signals.push(Signal::Hold);
-                        continue;
-                    }
-                    // CF-019: Use prior-bar close for signal generation (causal)
-                    // Signal at bar i uses close[i-1] and SMA[i-1] (known at bar i's open)
-                    let price = closes[i - 1];
-                    let s = sma_vals[i - 1];
-                    if !in_position && price > s * (1.0 + buy_threshold) {
-                        signals.push(Signal::Buy { amount: 100.0 }); // placeholder
-                        in_position = true;
-                    } else if in_position && price < s * (1.0 - sell_threshold) {
+                    let price = closes[i];
+                    let average = sma_vals[i];
+                    if price > average * (1.0 + buy_threshold) {
+                        signals.push(Signal::Buy { amount: 100.0 });
+                    } else if price < average * (1.0 - sell_threshold) {
                         signals.push(Signal::Sell { amount: SELL_ALL });
-                        in_position = false;
                     } else {
                         signals.push(Signal::Hold);
                     }
@@ -218,21 +209,12 @@ impl Strategy {
                 let fast_vals = sma(&closes, *fast_sma as usize);
                 let slow_vals = sma(&closes, *slow_sma as usize);
                 let mut signals = Vec::with_capacity(closes.len());
-                let mut position = 0.0; // 0 = no position, 1 = full
                 for i in 0..closes.len() {
-                    // CF-019: Use prior-bar regime for signal generation (causal)
-                    // Regime at bar i uses SMA values from bar i-1
-                    let regime = if i > 0 {
-                        detect_regime(&fast_vals, &slow_vals, i - 1)
-                    } else {
-                        Regime::Sideways
-                    };
-                    if regime == *buy_regime && position == 0.0 {
+                    let regime = detect_regime(&fast_vals, &slow_vals, i);
+                    if regime == *buy_regime {
                         signals.push(Signal::Buy { amount: 100.0 });
-                        position = 1.0;
-                    } else if regime == *sell_regime && position == 1.0 {
+                    } else if regime == *sell_regime {
                         signals.push(Signal::Sell { amount: SELL_ALL });
-                        position = 0.0;
                     } else {
                         signals.push(Signal::Hold);
                     }

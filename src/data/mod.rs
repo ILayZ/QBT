@@ -33,6 +33,19 @@ pub struct PriceSeries {
 }
 
 impl PriceSeries {
+    pub(crate) fn validate_hourly(&self) -> Result<()> {
+        for pair in self.bars.windows(2) {
+            if pair[1].timestamp - pair[0].timestamp != chrono::Duration::hours(1) {
+                anyhow::bail!(
+                    "Expected consecutive hourly bars, found {} followed by {}",
+                    pair[0].timestamp,
+                    pair[1].timestamp
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn len(&self) -> usize {
         self.bars.len()
     }
