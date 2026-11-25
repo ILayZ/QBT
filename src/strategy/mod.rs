@@ -111,7 +111,7 @@ pub fn rolling_vol(series: &[f64], window: usize) -> Vec<f64> {
 }
 
 /// Detect market regime based on SMA crossovers
-pub fn detect_regime(fast_sma: &Vec<f64>, slow_sma: &Vec<f64>, idx: usize) -> Regime {
+pub fn detect_regime(fast_sma: &[f64], slow_sma: &[f64], idx: usize) -> Regime {
     if idx >= fast_sma.len() || fast_sma[idx].is_nan() || slow_sma[idx].is_nan() {
         return Regime::Sideways;
     }
@@ -198,8 +198,7 @@ impl Strategy {
             } => {
                 let vols = rolling_vol(&closes, *vol_lookback as usize);
                 let mut signals = Vec::with_capacity(closes.len());
-                for i in 0..closes.len() {
-                    let vol = vols[i];
+                for vol in vols {
                     if vol.is_nan() {
                         signals.push(Signal::Hold);
                     } else {

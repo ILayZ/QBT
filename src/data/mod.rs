@@ -76,13 +76,13 @@ impl PriceSeries {
         let volumes: Vec<f64> = self.bars.iter().map(|b| b.volume).collect();
 
         Ok(DataFrame::new(vec![
-            Series::new("timestamp".into(), timestamps)
+            Series::new("timestamp", timestamps)
                 .cast(&DataType::Datetime(TimeUnit::Milliseconds, None))?,
-            Series::new("open".into(), opens),
-            Series::new("high".into(), highs),
-            Series::new("low".into(), lows),
-            Series::new("close".into(), closes),
-            Series::new("volume".into(), volumes),
+            Series::new("open", opens),
+            Series::new("high", highs),
+            Series::new("low", lows),
+            Series::new("close", closes),
+            Series::new("volume", volumes),
         ])?)
     }
 
@@ -120,11 +120,13 @@ impl PriceSeries {
 
     /// Load from CSV file
     pub fn from_csv(path: &Path, symbol: String) -> Result<Self> {
-        let mut read_options = CsvReadOptions::default();
-        read_options.has_header = true;
-        read_options.parse_options = std::sync::Arc::new(
-            polars::prelude::CsvParseOptions::default().with_try_parse_dates(true),
-        );
+        let read_options = CsvReadOptions {
+            has_header: true,
+            parse_options: std::sync::Arc::new(
+                polars::prelude::CsvParseOptions::default().with_try_parse_dates(true),
+            ),
+            ..Default::default()
+        };
         let df = read_options
             .try_into_reader_with_file_path(Some(path.to_path_buf()))?
             .finish()?;
@@ -174,15 +176,13 @@ impl MarketData {
         let min_ts = self
             .series
             .iter()
-            .map(|s| s.bars.first().map(|b| b.timestamp))
-            .flatten()
+            .filter_map(|s| s.bars.first().map(|b| b.timestamp))
             .max()
             .context("no data")?;
         let max_ts = self
             .series
             .iter()
-            .map(|s| s.bars.last().map(|b| b.timestamp))
-            .flatten()
+            .filter_map(|s| s.bars.last().map(|b| b.timestamp))
             .min()
             .context("no data")?;
 
