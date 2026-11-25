@@ -42,6 +42,18 @@ pub struct RunArgs {
     /// DCA amount
     #[argh(option, default = r#"100.0"#)]
     pub dca_amount: f64,
+    /// entry notional for DCA, MomentumSMA and RegimeSwitch; VolAdjustedDCA uses 1/24 per hour
+    #[argh(option)]
+    pub order_amount: Option<f64>,
+    /// maximum buy notional per strategy per UTC execution day
+    #[argh(option)]
+    pub daily_limit: Option<f64>,
+    /// count buy fees towards the daily limit
+    #[argh(switch)]
+    pub limit_includes_fees: bool,
+    /// write fills and rejected orders to this CSV
+    #[argh(option)]
+    pub ledger: Option<PathBuf>,
     /// initial capital
     #[argh(option, default = r#"10000.0"#)]
     pub capital: f64,
@@ -104,12 +116,45 @@ pub struct StrategiesArgs {
     pub verbose: bool,
 }
 
+fn builtin_strategy(
+    name: &str,
+    interval: u32,
+    amount: f64,
+    vol_base: f64,
+) -> Result<crate::strategy::Strategy> {
+    use crate::strategy::{Regime, Strategy};
+    Ok(match name.to_ascii_uppercase().as_str() {
+        "DCA" => Strategy::DCA {
+            interval_hours: interval,
+            amount,
+        },
+        "MOMENTUMSMA" => Strategy::MomentumSMA {
+            lookback: 20,
+            buy_threshold: 0.01,
+            sell_threshold: 0.01,
+        },
+        "VOLDCA" | "VOLADJUSTEDDCA" => Strategy::VolAdjustedDCA {
+            base_amount: vol_base,
+            vol_lookback: 30,
+            vol_multiplier_max: 2.0,
+        },
+        "REGIMESWITCH" => Strategy::RegimeSwitch {
+            fast_sma: 10,
+            slow_sma: 50,
+            buy_regime: Regime::Bull,
+            sell_regime: Regime::Bear,
+        },
+        _ => anyhow::bail!("Unknown strategy: {}", name),
+    })
+}
+
 impl RunArgs {
     pub fn execute(&self) -> Result<()> {
+        use crate::backtest::BuyBudget;
         use crate::backtest::{BacktestConfig, Backtester};
         use crate::data::PriceSeries;
         use crate::report::HtmlReport;
-        use crate::strategy::Strategy;
+        use std::io::{BufWriter, Write};
 
         // CF-017: Validate positive intervals and parameters at CLI boundary
         if self.dca_interval == 0 {
@@ -127,26 +172,26 @@ impl RunArgs {
 
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
 
-        let strategy: Strategy = match self.strategy.to_uppercase().as_str() {
-            "DCA" => Strategy::DCA {
-                interval_hours: self.dca_interval,
-                amount: self.dca_amount,
-            },
-            "MOMENTUMSMA" => Strategy::MomentumSMA {
-                lookback: 20,
-                buy_threshold: 0.01,
-                sell_threshold: 0.01,
-            },
-            "VOLDCA" | "VOLADJUSTEDDCA" => Strategy::VolAdjustedDCA {
-                base_amount: self.dca_amount,
-                vol_lookback: 30,
-                vol_multiplier_max: 2.0,
-            },
-            _ => {
-                anyhow::bail!("Unknown strategy: {}", self.strategy)
-            }
+        let names = if self.strategy.eq_ignore_ascii_case("all") {
+            vec!["DCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch"]
+        } else {
+            vec![self.strategy.as_str()]
         };
-
+        let amount = self.order_amount.unwrap_or(self.dca_amount);
+        anyhow::ensure!(
+            amount.is_finite() && amount > 0.0,
+            "Order amount must be positive and finite"
+        );
+        let vol_base = self.order_amount.map_or(self.dca_amount, |v| v / 24.0);
+        let strategies = names
+            .iter()
+            .map(|name| builtin_strategy(name, self.dca_interval, amount, vol_base))
+            .collect::<Result<Vec<_>>>()?;
+        let budget = BuyBudget {
+            daily_limit: self.daily_limit,
+            include_fees: self.limit_includes_fees,
+            entry_amount: self.order_amount,
+        };
         let config = BacktestConfig {
             initial_capital: self.capital,
             trading_fee: self.fee,
@@ -154,9 +199,47 @@ impl RunArgs {
             risk_free_rate: self.risk_free,
         };
         let bt = Backtester::new(config);
-        let result = bt.run(&series, &strategy)?;
-
-        let results = vec![result];
+        anyhow::ensure!(
+            self.ledger.as_ref() != Some(&self.output) && self.ledger.as_ref() != Some(&self.input),
+            "Choose a separate ledger path"
+        );
+        let mut ledger = self
+            .ledger
+            .as_ref()
+            .map(std::fs::File::create)
+            .transpose()?
+            .map(BufWriter::new);
+        if let Some(w) = &mut ledger {
+            writeln!(
+                w,
+                "strategy,signal_time,execution_time,side,status,price,quantity,fee,cash"
+            )?;
+        }
+        let mut results = Vec::new();
+        for strategy in strategies {
+            let result = bt.run_with_budget(&series, &strategy, &budget, |e| {
+                if let Some(w) = &mut ledger {
+                    writeln!(
+                        w,
+                        "{},{},{},{},{},{},{},{},{}",
+                        strategy.name(),
+                        e.signal_time.to_rfc3339(),
+                        e.execution_time.to_rfc3339(),
+                        e.side,
+                        e.status,
+                        e.price,
+                        e.quantity,
+                        e.fee,
+                        e.cash
+                    )?;
+                }
+                Ok(())
+            })?;
+            results.push(result);
+        }
+        if let Some(w) = &mut ledger {
+            w.flush()?;
+        }
         HtmlReport::generate(&results, &self.output)?;
 
         println!("Report written to {}", self.output.display());
@@ -169,7 +252,6 @@ impl WalkForwardArgs {
         use crate::backtest::{BacktestConfig, Backtester, WalkForwardConfig};
         use crate::data::PriceSeries;
         use crate::report::HtmlReport;
-        use crate::strategy::Strategy;
 
         // CF-017: Validate positive intervals and window sizes at CLI boundary
         if self.train == 0 {
@@ -182,50 +264,8 @@ impl WalkForwardArgs {
             anyhow::bail!("Step months must be positive, got 0");
         }
 
-        // Parse and validate strategy (CF-016: walk-forward must respect --strategy)
-        let strategy_name = self.strategy.to_uppercase();
-
-        // Validate strategy name early with clear error
-        match strategy_name.as_str() {
-            "DCA" | "MOMENTUMSMA" | "VOLDCA" | "VOLADJUSTEDDCA" | "REGIMESWITCH" => {}
-            _ => anyhow::bail!(
-                "Unknown strategy for walk-forward: {}. Supported: DCA, MomentumSMA, VolAdjustedDCA, RegimeSwitch",
-                self.strategy
-            ),
-        }
-
-        let strategy_factory = move |_train_end: u32, _test_end: u32| -> Strategy {
-            match strategy_name.as_str() {
-                "DCA" => Strategy::DCA {
-                    interval_hours: 24,
-                    amount: 100.0,
-                },
-                "MOMENTUMSMA" => Strategy::MomentumSMA {
-                    lookback: 20,
-                    buy_threshold: 0.01,
-                    sell_threshold: 0.01,
-                },
-                "VOLDCA" | "VOLADJUSTEDDCA" => Strategy::VolAdjustedDCA {
-                    base_amount: 100.0,
-                    vol_lookback: 30,
-                    vol_multiplier_max: 2.0,
-                },
-                "REGIMESWITCH" => Strategy::RegimeSwitch {
-                    fast_sma: 10,
-                    slow_sma: 50,
-                    buy_regime: crate::strategy::Regime::Bull,
-                    sell_regime: crate::strategy::Regime::Bear,
-                },
-                _ => {
-                    // This should not be reached since we validate above, but keep for safety
-                    Strategy::MomentumSMA {
-                        lookback: 20,
-                        buy_threshold: 0.01,
-                        sell_threshold: 0.01,
-                    }
-                }
-            }
-        };
+        let strategy = builtin_strategy(&self.strategy, 24, 100.0, 100.0)?;
+        let strategy_factory = move |_, _| strategy.clone();
 
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
         let bt = Backtester::new(BacktestConfig::default());

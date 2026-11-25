@@ -96,6 +96,24 @@ pub struct Backtester {
     pub config: BacktestConfig,
 }
 
+#[derive(Default)]
+pub struct BuyBudget {
+    pub daily_limit: Option<f64>,
+    pub include_fees: bool,
+    pub entry_amount: Option<f64>,
+}
+
+pub struct OrderEvent {
+    pub signal_time: chrono::DateTime<chrono::Utc>,
+    pub execution_time: chrono::DateTime<chrono::Utc>,
+    pub side: &'static str,
+    pub status: &'static str,
+    pub price: f64,
+    pub quantity: f64,
+    pub fee: f64,
+    pub cash: f64,
+}
+
 impl Backtester {
     pub fn new(config: BacktestConfig) -> Self {
         Self { config }
@@ -103,17 +121,36 @@ impl Backtester {
 
     #[instrument(skip_all)]
     pub fn run(&self, series: &PriceSeries, strategy: &Strategy) -> Result<BacktestResult> {
+        self.run_with_budget(series, strategy, &BuyBudget::default(), |_| Ok(()))
+    }
+
+    pub fn run_with_budget(
+        &self,
+        series: &PriceSeries,
+        strategy: &Strategy,
+        budget: &BuyBudget,
+        mut record: impl FnMut(OrderEvent) -> Result<()>,
+    ) -> Result<BacktestResult> {
+        for value in [budget.daily_limit, budget.entry_amount]
+            .into_iter()
+            .flatten()
+        {
+            anyhow::ensure!(
+                value.is_finite() && value > 0.0,
+                "Budget must be finite and positive"
+            );
+        }
         // CF-017: Validate nonempty data and finite, economically valid inputs at engine boundary
         if series.is_empty() {
             anyhow::bail!("Price series is empty");
         }
-        if self.config.initial_capital <= 0.0 {
+        if !self.config.initial_capital.is_finite() || self.config.initial_capital <= 0.0 {
             anyhow::bail!("Initial capital must be positive");
         }
-        if self.config.trading_fee < 0.0 || self.config.trading_fee >= 1.0 {
+        if !(0.0..1.0).contains(&self.config.trading_fee) {
             anyhow::bail!("Trading fee must be in [0, 1)");
         }
-        if self.config.slippage < 0.0 || self.config.slippage >= 1.0 {
+        if !(0.0..1.0).contains(&self.config.slippage) {
             anyhow::bail!("Slippage must be in [0, 1)");
         }
         // Validate all prices are finite and positive
@@ -157,19 +194,64 @@ impl Backtester {
         let mut equity = vec![cash];
         let mut trades = Vec::new();
 
+        let mut spent = 0.0;
+        let mut day = series.bars[0].timestamp.date_naive();
+
         // A close signal can only fill at the following open. Mark each bar at its close.
-        for (signal, bar) in signals.iter().zip(series.bars.iter().skip(1)) {
+        for (signal, pair) in signals.iter().zip(series.bars.windows(2)) {
+            let bar = &pair[1];
+            if bar.timestamp.date_naive() != day {
+                day = bar.timestamp.date_naive();
+                spent = 0.0;
+            }
             let exec_price = bar.open;
             let exec_ts = bar.timestamp;
+            let event = |side, status, price, quantity, fee, cash| OrderEvent {
+                signal_time: pair[0].timestamp,
+                execution_time: exec_ts,
+                side,
+                status,
+                price,
+                quantity,
+                fee,
+                cash,
+            };
             match signal {
                 Signal::Buy { amount } if !single_position || lots.is_empty() => {
                     let buy_price = exec_price * (1.0 + self.config.slippage);
-                    let fee = *amount * self.config.trading_fee;
-                    let total_cost = *amount + fee;
+                    let requested = if single_position {
+                        budget.entry_amount.unwrap_or(*amount)
+                    } else {
+                        *amount
+                    };
+                    let fee_factor = if budget.include_fees {
+                        1.0 + self.config.trading_fee
+                    } else {
+                        1.0
+                    };
+                    let remaining = budget.daily_limit.unwrap_or(f64::INFINITY) - spent;
+                    let amount = requested.min(remaining / fee_factor);
+                    let fee = amount * self.config.trading_fee;
+                    // A fee-inclusive cap can round a debit a few ulps above the allowance.
+                    let total_cost = if budget.include_fees {
+                        (amount * fee_factor).min(remaining)
+                    } else {
+                        amount + fee
+                    };
 
-                    if cash >= total_cost {
+                    if amount <= 0.0 {
+                        record(event("buy", "daily_limit", buy_price, 0.0, 0.0, cash))?;
+                    } else if cash < total_cost {
+                        record(event("buy", "insufficient_cash", buy_price, 0.0, 0.0, cash))?;
+                    } else {
                         cash -= total_cost;
-                        let qty = *amount / buy_price;
+                        spent = if requested >= remaining / fee_factor {
+                            budget.daily_limit.unwrap_or(f64::INFINITY)
+                        } else {
+                            spent + amount * fee_factor
+                        };
+                        let qty = amount / buy_price;
+                        record(event("buy", "filled", buy_price, qty, fee, cash))?;
                         // Cost per unit includes entry fee pro-rated
                         let cost_per_unit = buy_price * (1.0 + self.config.trading_fee);
                         lots.push(Lot {
@@ -232,9 +314,15 @@ impl Backtester {
                         let proceeds = qty_to_sell * sell_price;
                         let fee = proceeds * self.config.trading_fee;
                         cash += proceeds - fee;
+                        record(event("sell", "filled", sell_price, qty_to_sell, fee, cash))?;
+                    } else {
+                        record(event("sell", "no_position", exec_price, 0.0, 0.0, cash))?;
                     }
                 }
-                Signal::Buy { .. } | Signal::Hold => {}
+                Signal::Buy { .. } => {
+                    record(event("buy", "position_open", exec_price, 0.0, 0.0, cash))?;
+                }
+                Signal::Hold => {}
             }
 
             let position_qty: f64 = lots.iter().map(|l| l.quantity).sum();

@@ -78,5 +78,17 @@ CSV
   fi
 fi
 
+for mode in exclusive inclusive; do
+  flags=()
+  [[ "$mode" == inclusive ]] && flags+=(--limit-includes-fees)
+  if "$BIN" run --input "$DATA" --strategy all --capital 1800 --order-amount 10 \
+      --daily-limit 10 "${flags[@]}" --ledger "$OUT_DIR/orders.csv" --output "$OUT_DIR/all.html" &&
+      python3 scripts/check_budget.py "$DATA" "$OUT_DIR/orders.csv" "$OUT_DIR/all.html" "$mode"; then
+    ok "daily limit and portfolio reconciliation ($mode)"
+  else
+    bad "daily limit and portfolio reconciliation ($mode)"
+  fi
+done
+
 echo "== RESULT: $pass passed, $fail failed =="
 [[ "$fail" -eq 0 ]] && exit 0 || exit 1
