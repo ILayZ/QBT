@@ -48,6 +48,9 @@ pub struct RunArgs {
     /// maximum buy notional per strategy per UTC execution day
     #[argh(option)]
     pub daily_limit: Option<f64>,
+    /// minimum executed order value before fees (buys and sells)
+    #[argh(option)]
+    pub min_notional: Option<f64>,
     /// count buy fees towards the daily limit
     #[argh(switch)]
     pub limit_includes_fees: bool,
@@ -189,6 +192,7 @@ impl RunArgs {
             .collect::<Result<Vec<_>>>()?;
         let budget = BuyBudget {
             daily_limit: self.daily_limit,
+            min_notional: self.min_notional,
             include_fees: self.limit_includes_fees,
             entry_amount: self.order_amount,
         };
@@ -240,7 +244,34 @@ impl RunArgs {
         if let Some(w) = &mut ledger {
             w.flush()?;
         }
-        HtmlReport::generate(&results, &self.output)?;
+        if self.strategy.eq_ignore_ascii_case("all") {
+            use crate::strategy::Strategy;
+            let benchmark_budget = BuyBudget {
+                min_notional: self.min_notional,
+                ..BuyBudget::default()
+            };
+            let cash = Strategy::Custom {
+                name: "Cash".into(),
+                config: serde_json::Value::Null,
+            };
+            results.push(bt.run(&series, &cash)?);
+            let affordable = self.capital / (1.0 + self.fee);
+            let amount = if affordable + affordable * self.fee > self.capital {
+                affordable.next_down()
+            } else {
+                affordable
+            };
+            let lump_sum = Strategy::DCA {
+                interval_hours: u32::MAX,
+                amount,
+            };
+            let mut hold = bt.run_with_budget(&series, &lump_sum, &benchmark_budget, |_| Ok(()))?;
+            hold.strategy_name = "Buy and hold".into();
+            results.push(hold);
+            HtmlReport::comparison(&results, &self.output)?;
+        } else {
+            HtmlReport::generate(&results, &self.output)?;
+        }
 
         println!("Report written to {}", self.output.display());
         Ok(())

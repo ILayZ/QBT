@@ -20,6 +20,12 @@ pub struct BacktestResult {
     pub strategy_name: String,
     pub initial_capital: f64,
     pub final_value: f64,
+    #[serde(default)]
+    pub mean_asset_weight: Option<f64>,
+    #[serde(default)]
+    pub skipped_buys: usize,
+    #[serde(default)]
+    pub below_minimum_buys: usize,
     pub total_return: f64, // percentage
     pub cagr: f64,         // annualized
     pub sharpe_ratio: f64,
@@ -99,6 +105,7 @@ pub struct Backtester {
 #[derive(Default)]
 pub struct BuyBudget {
     pub daily_limit: Option<f64>,
+    pub min_notional: Option<f64>,
     pub include_fees: bool,
     pub entry_amount: Option<f64>,
 }
@@ -131,7 +138,7 @@ impl Backtester {
         budget: &BuyBudget,
         mut record: impl FnMut(OrderEvent) -> Result<()>,
     ) -> Result<BacktestResult> {
-        for value in [budget.daily_limit, budget.entry_amount]
+        for value in [budget.daily_limit, budget.entry_amount, budget.min_notional]
             .into_iter()
             .flatten()
         {
@@ -194,6 +201,10 @@ impl Backtester {
         let mut equity = vec![cash];
         let mut trades = Vec::new();
 
+        let minimum = budget.min_notional.unwrap_or(0.0);
+        let mut weight_sum = 0.0;
+        let mut skipped_buys = 0;
+        let mut below_minimum_buys = 0;
         let mut spent = 0.0;
         let mut day = series.bars[0].timestamp.date_naive();
 
@@ -240,8 +251,21 @@ impl Backtester {
                     };
 
                     if amount <= 0.0 {
+                        skipped_buys += 1;
                         record(event("buy", "daily_limit", buy_price, 0.0, 0.0, cash))?;
+                    } else if amount < minimum {
+                        skipped_buys += 1;
+                        below_minimum_buys += 1;
+                        record(event(
+                            "buy",
+                            "below_min_notional",
+                            buy_price,
+                            0.0,
+                            0.0,
+                            cash,
+                        ))?;
                     } else if cash < total_cost {
+                        skipped_buys += 1;
                         record(event("buy", "insufficient_cash", buy_price, 0.0, 0.0, cash))?;
                     } else {
                         cash -= total_cost;
@@ -272,64 +296,82 @@ impl Backtester {
                         } else {
                             (*amount).min(position * sell_price)
                         };
-                        let qty_to_sell = notional / sell_price;
+                        if notional < minimum {
+                            record(event(
+                                "sell",
+                                "below_min_notional",
+                                sell_price,
+                                0.0,
+                                0.0,
+                                cash,
+                            ))?;
+                        } else {
+                            let qty_to_sell = notional / sell_price;
 
-                        // FIFO lot consumption
-                        let mut remaining_to_sell = qty_to_sell;
-                        let mut consumed_lots: Vec<Lot> = Vec::new();
+                            // FIFO lot consumption
+                            let mut remaining_to_sell = qty_to_sell;
+                            let mut consumed_lots: Vec<Lot> = Vec::new();
 
-                        for lot in lots.drain(..) {
-                            if remaining_to_sell <= 1e-9 {
-                                consumed_lots.push(lot);
-                                continue;
-                            }
-                            let take = lot.quantity.min(remaining_to_sell);
-                            // P&L = (sell_price - cost_per_unit) * take
-                            // cost_per_unit already includes entry fee; subtract exit fee from proceeds
-                            let exit_fee_per_unit = sell_price * self.config.trading_fee;
-                            let net_sell_per_unit = sell_price - exit_fee_per_unit;
-                            let pnl = (net_sell_per_unit - lot.cost_per_unit) * take;
-                            trades.push(Trade {
-                                entry_time: lot.entry_time,
-                                exit_time: Some(exec_ts),
-                                entry_price: lot.cost_per_unit, // cost basis includes entry fee
-                                exit_price: Some(net_sell_per_unit), // net of exit fee
-                                quantity: take,
-                                pnl: Some(pnl),
-                            });
-
-                            remaining_to_sell -= take;
-                            let lot_remain = lot.quantity - take;
-                            if lot_remain > 1e-9 {
-                                consumed_lots.push(Lot {
-                                    quantity: lot_remain,
-                                    cost_per_unit: lot.cost_per_unit,
+                            for lot in lots.drain(..) {
+                                if remaining_to_sell <= 1e-9 {
+                                    consumed_lots.push(lot);
+                                    continue;
+                                }
+                                let take = lot.quantity.min(remaining_to_sell);
+                                // P&L = (sell_price - cost_per_unit) * take
+                                // cost_per_unit already includes entry fee; subtract exit fee from proceeds
+                                let exit_fee_per_unit = sell_price * self.config.trading_fee;
+                                let net_sell_per_unit = sell_price - exit_fee_per_unit;
+                                let pnl = (net_sell_per_unit - lot.cost_per_unit) * take;
+                                trades.push(Trade {
                                     entry_time: lot.entry_time,
+                                    exit_time: Some(exec_ts),
+                                    entry_price: lot.cost_per_unit, // cost basis includes entry fee
+                                    exit_price: Some(net_sell_per_unit), // net of exit fee
+                                    quantity: take,
+                                    pnl: Some(pnl),
                                 });
-                            }
-                        }
-                        // Put back unconsumed lots
-                        lots = consumed_lots;
 
-                        let proceeds = qty_to_sell * sell_price;
-                        let fee = proceeds * self.config.trading_fee;
-                        cash += proceeds - fee;
-                        record(event("sell", "filled", sell_price, qty_to_sell, fee, cash))?;
+                                remaining_to_sell -= take;
+                                let lot_remain = lot.quantity - take;
+                                if lot_remain > 1e-9 {
+                                    consumed_lots.push(Lot {
+                                        quantity: lot_remain,
+                                        cost_per_unit: lot.cost_per_unit,
+                                        entry_time: lot.entry_time,
+                                    });
+                                }
+                            }
+                            // Put back unconsumed lots
+                            lots = consumed_lots;
+
+                            let proceeds = qty_to_sell * sell_price;
+                            let fee = proceeds * self.config.trading_fee;
+                            cash += proceeds - fee;
+                            record(event("sell", "filled", sell_price, qty_to_sell, fee, cash))?;
+                        }
                     } else {
                         record(event("sell", "no_position", exec_price, 0.0, 0.0, cash))?;
                     }
                 }
                 Signal::Buy { .. } => {
+                    skipped_buys += 1;
                     record(event("buy", "position_open", exec_price, 0.0, 0.0, cash))?;
                 }
                 Signal::Hold => {}
             }
 
             let position_qty: f64 = lots.iter().map(|l| l.quantity).sum();
-            equity.push(cash + position_qty * bar.close);
+            let asset_value = position_qty * bar.close;
+            let value = cash + asset_value;
+            weight_sum += asset_value / value;
+            equity.push(value);
         }
 
         let mut metrics = calculate_metrics(&equity, &trades, self.config.risk_free_rate);
+        metrics.mean_asset_weight = Some(weight_sum / equity.len() as f64);
+        metrics.skipped_buys = skipped_buys;
+        metrics.below_minimum_buys = below_minimum_buys;
         metrics.strategy_name = strategy.name().to_string();
 
         info!(
@@ -451,6 +493,9 @@ fn calculate_metrics(equity: &[f64], trades: &[Trade], risk_free_rate: f64) -> B
         strategy_name: String::new(),
         initial_capital: equity[0],
         final_value: *equity.last().unwrap(),
+        mean_asset_weight: None,
+        skipped_buys: 0,
+        below_minimum_buys: 0,
         total_return: metrics.total_return,
         cagr: metrics.cagr,
         sharpe_ratio: metrics.sharpe_ratio,
@@ -613,6 +658,37 @@ mod tests {
         let rejected = poor.run(&series, &strategy).unwrap();
         assert_eq!(rejected.equity_curve, vec![100.0; 4]);
         assert!(rejected.trade_log.is_empty());
+    }
+
+    #[test]
+    fn minimum_allows_exact_buy_and_preserves_position_on_small_exit() {
+        let series = make_series(vec![100.0, 120.0, 100.0, 80.0, 70.0]);
+        let strategy = Strategy::MomentumSMA {
+            lookback: 2,
+            buy_threshold: 0.01,
+            sell_threshold: 0.01,
+        };
+        let bt = Backtester::new(BacktestConfig {
+            initial_capital: 1000.0,
+            slippage: 0.0,
+            trading_fee: 0.0,
+            risk_free_rate: 0.0,
+        });
+        let budget = BuyBudget {
+            min_notional: Some(100.0),
+            ..BuyBudget::default()
+        };
+        let mut events = Vec::new();
+        let result = bt
+            .run_with_budget(&series, &strategy, &budget, |e| {
+                events.push((e.side, e.status, e.cash));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(events[0], ("buy", "filled", 900.0));
+        assert_eq!(events[1], ("sell", "below_min_notional", 900.0));
+        assert!(result.trade_log.is_empty());
+        assert_eq!(result.final_value, 970.0);
     }
 
     #[test]

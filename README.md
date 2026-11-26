@@ -111,6 +111,15 @@ this flag, existing sizing defaults apply. The optional CSV journal lists execut
 and skipped orders with their signal and execution-bar timestamps, status, price,
 filled quantity, fee and remaining cash.
 
+Add `--min-notional 1` to skip buys and sells below $1 after applying the buy
+budget and before fees. Skips are recorded as `below_min_notional` and consume
+no cash or daily allowance. With `--strategy all`, the report plots hourly closing
+equity and compares final value against DCA, drawdown, mean invested share across
+bar closes, and skipped buy counts. The cash benchmark earns zero interest.
+Buy and hold invests the initial balance at the first executable open, with the
+same fee, slippage and order minimum; the daily allocation limit applies only
+to the four strategies.
+
 ### `walk-forward`
 
 | Flag | Default | Description |

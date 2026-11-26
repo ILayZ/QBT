@@ -90,5 +90,41 @@ for mode in exclusive inclusive; do
   fi
 done
 
+if "$BIN" run --input "$DATA" --strategy all --capital 1800 --order-amount 10 \
+    --daily-limit 10 --min-notional 1 --output "$OUT_DIR/min.html" --ledger "$OUT_DIR/min.csv" &&
+    python3 - "$OUT_DIR/min.html" "$OUT_DIR/min.csv" <<'PYTHON'
+import csv
+import re
+import sys
+from pathlib import Path
+
+html = Path(sys.argv[1]).read_text()
+with open(sys.argv[2]) as stream:
+    orders = list(csv.DictReader(stream))
+assert "<svg" in html
+for name in ("DCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch", "Cash", "Buy and hold"):
+    match = re.search(r"<tr><td>" + name + r"</td>(.*?)</tr>", html)
+    values = re.findall(r"<td>([^<]*)</td>", match[1])
+    print(name, *values)
+    buys = [r for r in orders if r["strategy"] == name and r["side"] == "buy"]
+    if buys:
+        assert int(values[-2]) == sum(r["status"] != "filled" for r in buys)
+        assert int(values[-1]) == sum(r["status"] == "below_min_notional" for r in buys)
+    if name == "VolAdjustedDCA":
+        assert len(buys) > 4000 and all(r["status"] == "below_min_notional" for r in buys)
+        assert values[0] == "$1800.00" and values[3] == "0.00%"
+    if name == "DCA":
+        assert values[0] == "$1875.49" and values[1] == "+0.00"
+    if name == "Cash":
+        assert values[0] == "$1800.00" and values[3] == "0.00%"
+    if name == "Buy and hold":
+        assert float(values[3].rstrip("%")) > 99
+PYTHON
+then
+  ok "minimum order value and comparison baselines"
+else
+  bad "minimum order value and comparison baselines"
+fi
+
 echo "== RESULT: $pass passed, $fail failed =="
 [[ "$fail" -eq 0 ]] && exit 0 || exit 1
