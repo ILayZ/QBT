@@ -1,5 +1,6 @@
 use anyhow::Result;
 use argh::FromArgs;
+use qbt_engine::run::{BUILTINS, RunSpec, builtin_strategy};
 use std::path::PathBuf;
 
 /// QBT - High-performance quantitative backtesting engine
@@ -131,49 +132,9 @@ pub struct StrategiesArgs {
     pub verbose: bool,
 }
 
-fn builtin_strategy(
-    name: &str,
-    interval: u32,
-    amount: f64,
-    vol_base: f64,
-    dip_lookback: usize,
-    dip_percent: f64,
-) -> Result<qbt_engine::strategy::Strategy> {
-    use qbt_engine::strategy::{Regime, Strategy};
-    Ok(match name.to_ascii_uppercase().as_str() {
-        "DIPDCA" => Strategy::DipDCA {
-            daily_allocation: amount,
-            lookback_hours: dip_lookback,
-            drop_fraction: dip_percent / 100.0,
-        },
-        "DCA" => Strategy::DCA {
-            interval_hours: interval,
-            amount,
-        },
-        "MOMENTUMSMA" => Strategy::MomentumSMA {
-            lookback: 20,
-            buy_threshold: 0.01,
-            sell_threshold: 0.01,
-        },
-        "VOLDCA" | "VOLADJUSTEDDCA" => Strategy::VolAdjustedDCA {
-            base_amount: vol_base,
-            vol_lookback: 30,
-            vol_multiplier_max: 2.0,
-        },
-        "REGIMESWITCH" => Strategy::RegimeSwitch {
-            fast_sma: 10,
-            slow_sma: 50,
-            buy_regime: Regime::Bull,
-            sell_regime: Regime::Bear,
-        },
-        _ => anyhow::bail!("Unknown strategy: {}", name),
-    })
-}
-
 impl RunArgs {
     pub fn execute(&self) -> Result<()> {
-        use qbt_engine::backtest::BuyBudget;
-        use qbt_engine::backtest::{BacktestConfig, Backtester};
+        use qbt_engine::backtest::{BacktestConfig, BuyBudget};
         use qbt_engine::data::PriceSeries;
         use qbt_engine::report::HtmlReport;
         use std::io::{BufWriter, Write};
@@ -195,13 +156,7 @@ impl RunArgs {
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
 
         let names = if self.strategy.eq_ignore_ascii_case("all") {
-            vec![
-                "DCA",
-                "DipDCA",
-                "VolAdjustedDCA",
-                "MomentumSMA",
-                "RegimeSwitch",
-            ]
+            BUILTINS.to_vec()
         } else {
             vec![self.strategy.as_str()]
         };
@@ -236,7 +191,13 @@ impl RunArgs {
             slippage: self.slippage,
             risk_free_rate: self.risk_free,
         };
-        let bt = Backtester::new(config);
+        let spec = RunSpec {
+            version: RunSpec::VERSION,
+            strategies,
+            config,
+            budget,
+            include_benchmarks: self.strategy.eq_ignore_ascii_case("all"),
+        };
         anyhow::ensure!(
             self.ledger.as_ref() != Some(&self.output) && self.ledger.as_ref() != Some(&self.input),
             "Choose a separate ledger path"
@@ -253,55 +214,28 @@ impl RunArgs {
                 "strategy,signal_time,execution_time,side,status,price,quantity,fee,cash"
             )?;
         }
-        let mut results = Vec::new();
-        for strategy in strategies {
-            let result = bt.run_with_budget(&series, &strategy, &budget, |e| {
-                if let Some(w) = &mut ledger {
-                    writeln!(
-                        w,
-                        "{},{},{},{},{},{},{},{},{}",
-                        strategy.name(),
-                        e.signal_time.to_rfc3339(),
-                        e.execution_time.to_rfc3339(),
-                        e.side,
-                        e.status,
-                        e.price,
-                        e.quantity,
-                        e.fee,
-                        e.cash
-                    )?;
-                }
-                Ok(())
-            })?;
-            results.push(result);
-        }
+        let results = spec.execute(&series, |name, e| {
+            if let Some(w) = &mut ledger {
+                writeln!(
+                    w,
+                    "{},{},{},{},{},{},{},{},{}",
+                    name,
+                    e.signal_time.to_rfc3339(),
+                    e.execution_time.to_rfc3339(),
+                    e.side,
+                    e.status,
+                    e.price,
+                    e.quantity,
+                    e.fee,
+                    e.cash
+                )?;
+            }
+            Ok(())
+        })?;
         if let Some(w) = &mut ledger {
             w.flush()?;
         }
-        if self.strategy.eq_ignore_ascii_case("all") {
-            use qbt_engine::strategy::Strategy;
-            let benchmark_budget = BuyBudget {
-                min_notional: self.min_notional,
-                ..BuyBudget::default()
-            };
-            let cash = Strategy::Custom {
-                name: "Cash".into(),
-                config: serde_json::Value::Null,
-            };
-            results.push(bt.run(&series, &cash)?);
-            let affordable = self.capital / (1.0 + self.fee);
-            let amount = if affordable + affordable * self.fee > self.capital {
-                affordable.next_down()
-            } else {
-                affordable
-            };
-            let lump_sum = Strategy::DCA {
-                interval_hours: u32::MAX,
-                amount,
-            };
-            let mut hold = bt.run_with_budget(&series, &lump_sum, &benchmark_budget, |_| Ok(()))?;
-            hold.strategy_name = "Buy and hold".into();
-            results.push(hold);
+        if spec.include_benchmarks {
             HtmlReport::comparison(&results, &self.output)?;
         } else {
             HtmlReport::generate(&results, &self.output)?;

@@ -19,7 +19,7 @@ The local CLI reads local files and calls the same library directly. Keep databa
 
 ## Contract between platform and engine
 
-Introduce a versioned `RunSpec` and a library entry point shared by the CLI and worker. Extract strategy construction and comparison orchestration from `apps/cli/src/cli/mod.rs`. Within `crates/qbt-engine`, keep fills and accounting in `src/backtest`, signals in `src/strategy`, metrics in `src/metrics` and HTML generation in `src/report`. A registry supplies strategy IDs, parameter types, ranges and defaults to both the CLI and the API.
+The engine exposes `run::RunSpec` for single and comparison runs. It holds resolved strategies, execution configuration, buy budget and benchmark selection. `RunSpec::execute` receives a price series and ledger callback. The CLI handles files and rendering. Dataset provenance and build identity belong in the future platform run manifest. Within `crates/qbt-engine`, keep fills and accounting in `src/backtest`, signals in `src/strategy`, metrics in `src/metrics` and HTML generation in `src/report`. A registry supplies strategy IDs, parameter types, ranges and defaults to both the CLI and the API.
 
 Persist a fully resolved spec when accepting a run. Include schema version, engine build/commit, dataset version and normalized content hash, symbol, timeframe, UTC range, mode, strategy IDs and parameters, initial capital, order sizing, fees, slippage, risk-free rate, minimum notional and daily budget including its fee policy. Include benchmark and window settings when applicable. A worker must claim only builds it can execute. Store the effective spec with the result so a later change to defaults cannot alter a replay.
 
