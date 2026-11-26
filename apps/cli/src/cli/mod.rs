@@ -71,6 +71,12 @@ pub struct RunArgs {
     /// write fills and rejected orders to this CSV
     #[argh(option)]
     pub ledger: Option<PathBuf>,
+    /// portfolio summary JSON path
+    #[argh(option)]
+    pub summary: Option<PathBuf>,
+    /// hourly equity JSON path
+    #[argh(option)]
+    pub equity: Option<PathBuf>,
     /// initial capital
     #[argh(option, default = r#"10000.0"#)]
     pub capital: f64,
@@ -101,6 +107,12 @@ pub struct ReplayArgs {
     /// optional order ledger CSV
     #[argh(option)]
     pub ledger: Option<PathBuf>,
+    /// portfolio summary JSON path
+    #[argh(option)]
+    pub summary: Option<PathBuf>,
+    /// hourly equity JSON path
+    #[argh(option)]
+    pub equity: Option<PathBuf>,
 }
 
 /// Evaluate fixed parameters across independent time windows
@@ -221,12 +233,14 @@ impl RunArgs {
             budget,
             include_benchmarks: self.strategy.eq_ignore_ascii_case("all"),
         };
-        distinct_paths(
-            &self.input,
-            &self.output,
+        distinct_paths(&[
+            Some(&self.input),
+            Some(&self.output),
             self.ledger.as_deref(),
             self.save_manifest.as_deref(),
-        )?;
+            self.summary.as_deref(),
+            self.equity.as_deref(),
+        ])?;
         if let Some(path) = &self.save_manifest {
             anyhow::ensure!(!path.try_exists()?, "Choose a new manifest path");
             let manifest = RunManifest::new(&series, spec)?;
@@ -235,10 +249,19 @@ impl RunArgs {
                 &series,
                 &self.output,
                 self.ledger.as_deref(),
+                self.summary.as_deref(),
+                self.equity.as_deref(),
             )?;
             manifest.save(path)?;
         } else {
-            render(&spec, &series, &self.output, self.ledger.as_deref())?;
+            render(
+                &spec,
+                &series,
+                &self.output,
+                self.ledger.as_deref(),
+                self.summary.as_deref(),
+                self.equity.as_deref(),
+            )?;
         }
         Ok(())
     }
@@ -248,12 +271,14 @@ impl ReplayArgs {
     pub fn execute(&self) -> Result<()> {
         use qbt_engine::data::PriceSeries;
 
-        distinct_paths(
-            &self.input,
-            &self.output,
+        distinct_paths(&[
+            Some(&self.input),
+            Some(&self.output),
             self.ledger.as_deref(),
             Some(&self.manifest),
-        )?;
+            self.summary.as_deref(),
+            self.equity.as_deref(),
+        ])?;
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
         let manifest = RunManifest::load(&self.manifest)?;
         manifest.verify(&series)?;
@@ -262,6 +287,8 @@ impl ReplayArgs {
             &series,
             &self.output,
             self.ledger.as_deref(),
+            self.summary.as_deref(),
+            self.equity.as_deref(),
         )
     }
 }
@@ -271,6 +298,8 @@ fn render(
     series: &qbt_engine::data::PriceSeries,
     output: &Path,
     ledger_path: Option<&Path>,
+    summary_path: Option<&Path>,
+    equity_path: Option<&Path>,
 ) -> Result<()> {
     use qbt_engine::report::HtmlReport;
     use std::io::{BufWriter, Write};
@@ -305,6 +334,12 @@ fn render(
     })?;
     if let Some(w) = &mut ledger {
         w.flush()?;
+    }
+    if let Some(path) = summary_path {
+        qbt_engine::report::json::summary(path, &results)?;
+    }
+    if let Some(path) = equity_path {
+        qbt_engine::report::json::equity(path, series, &results)?;
     }
     if spec.include_benchmarks {
         HtmlReport::comparison(&results, output)?;

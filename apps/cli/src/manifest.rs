@@ -95,22 +95,14 @@ fn resolved(path: &Path) -> Result<PathBuf> {
         .join(path.file_name().context("Expected a file path")?))
 }
 
-pub fn distinct_paths(
-    input: &Path,
-    output: &Path,
-    ledger: Option<&Path>,
-    manifest: Option<&Path>,
-) -> Result<()> {
+pub fn distinct_paths(paths: &[Option<&Path>]) -> Result<()> {
     let mut seen: Vec<PathBuf> = Vec::new();
-    for path in [Some(input), Some(output), ledger, manifest]
-        .into_iter()
-        .flatten()
-    {
+    for path in paths.iter().flatten() {
         let path = resolved(path)?;
         for prior in &seen {
             ensure!(
                 prior != &path,
-                "Choose separate input, report, ledger and manifest paths"
+                "Choose separate input and output paths"
             );
             if prior.exists() && path.exists() {
                 ensure!(

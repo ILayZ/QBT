@@ -29,6 +29,12 @@ curl -fsS "$base/v1/runs/$run/artifacts/manifest.json" -o manifest.json
 
 Interactive endpoint documentation is at `/docs`. Upload accepts raw CSV up to 8 MiB. Identical bytes share one dataset ID. Upload records the bytes, and the engine validates the bars during a run. A failed simulation exposes its error through the status endpoint.
 
-This first deployment stores inputs, job state and artifacts together in PostgreSQL. Workers claim jobs for their binary's SHA-256. Keep the binary immutable while either process runs and restart both when upgrading. An expired six-minute lease allows another worker of the same build to recover a job. A five-minute subprocess timeout bounds execution. The attempt token fences publication, and all three artifacts become visible in one transaction. The API supports single and comparison runs. Project authentication, walk-forward submission and external object storage are planned.
+This first deployment stores inputs, job state and artifacts together in PostgreSQL. Workers claim jobs for their binary's SHA-256. Keep the binary immutable while either process runs and restart both when upgrading. An expired six-minute lease allows another worker of the same build to recover a job. A five-minute subprocess timeout bounds execution. The attempt token fences publication, and all artifacts become visible in one transaction. The API supports single and comparison runs. Project authentication, walk-forward submission and external object storage are planned.
 
 Use **Cancel run** in the workspace or `POST /v1/runs/{id}/cancel` to cancel a queued or running job. A successful cancellation immediately revokes the attempt and prevents artifact publication. The worker checks ownership at one-second intervals during execution. Repeating a cancellation succeeds. If completion won the race, the API returns HTTP 409 and preserves the result.
+
+### Machine-readable results
+
+New single and comparison runs publish `summary.json` and `equity.json` alongside the HTML, ledger and manifest. Discover available artifacts through `GET /v1/runs/{id}`. Earlier runs retain their original downloads. For a local run or replay, pass `--summary summary.json --equity equity.json`.
+
+Both JSON documents carry `version: 1`. Summary returns, drawdowns and weights are fractions. Equity, DCA differences and reserves use the input's quote currency. Completed trades count closed trades, while the ledger includes buys and skipped orders. DCA differences are null when DCA is absent. Reserve fields apply to DipDCA. Equity contains one ordered UTC bar timestamp array and one equally long array of close valuations per portfolio, including benchmarks. Values retain engine precision.

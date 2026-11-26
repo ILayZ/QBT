@@ -1,3 +1,5 @@
+pub mod json;
+
 use crate::backtest::BacktestResult;
 use anyhow::Result;
 use std::path::Path;
