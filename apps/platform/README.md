@@ -31,9 +31,19 @@ Interactive endpoint documentation is at `/docs`. Upload accepts raw CSV up to 8
 
 To retry a submission safely, send an optional `Idempotency-Key` header with `POST /v1/runs`. Use one case-sensitive key of 1 to 128 visible ASCII characters without commas, such as a UUID. The key applies across the local service. A retry with the same dataset ID and validated options, including defaults, returns HTTP 202 with the original run ID and its current state, even after completion. Reusing a key with a different dataset or options returns HTTP 409. Each request without the header creates a new run. Keys are retained with their runs.
 
-This first deployment stores inputs, job state and artifacts together in PostgreSQL. Workers claim jobs for their binary's SHA-256. Keep the binary immutable while either process runs and restart both when upgrading. An expired six-minute lease allows a worker of the same build to recover a job. The attempt token fences publication, and all artifacts become visible in one transaction. The API supports single and comparison runs. Project authentication, walk-forward submission and external object storage are planned.
+This first deployment stores inputs, job state and artifacts together in PostgreSQL. Workers claim jobs for their binary's SHA-256. Keep the binary immutable while either process runs and restart both when upgrading. While the CLI is running, the worker renews its lease every second. Another worker of the same build can reclaim the job after the lease expires. Three expired attempts mark a job failed. On Linux, the kernel also stops the CLI subprocess if the worker dies abruptly. Only the current attempt with an active lease can publish, and all artifacts become visible in one transaction. The API supports single and comparison runs. Project authentication, walk-forward submission and external object storage are planned.
 
-Use **Cancel run** in the workspace or `POST /v1/runs/{id}/cancel` to cancel a queued or running job. A successful cancellation immediately revokes the attempt and prevents artifact publication. The worker checks ownership at one-second intervals during execution. Repeating a cancellation succeeds. If completion won the race, the API returns HTTP 409 and preserves the result.
+The worker accepts these environment variables, in seconds.
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `QBT_WORKER_LEASE_SECONDS` | 30 | Time a claim remains valid after its last renewal |
+| `QBT_WORKER_HEARTBEAT_SECONDS` | 1 | Interval for renewing the lease and detecting cancellation |
+| `QBT_WORKER_TIMEOUT_SECONDS` | 300 | Hard execution limit for the CLI |
+
+Use a heartbeat shorter than the lease. Increase the timeout for simulations that need more than five minutes. For Compose, set these variables in the shell or the project's `.env` file before starting the stack.
+
+Use **Cancel run** in the workspace or `POST /v1/runs/{id}/cancel` to cancel a queued or running job. A successful cancellation immediately revokes the attempt and prevents artifact publication. The worker checks ownership at each heartbeat during execution. Repeating a cancellation succeeds. If completion won the race, the API returns HTTP 409 and preserves the result.
 
 ## Stop, back up, and restore
 

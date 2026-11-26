@@ -132,6 +132,7 @@ jobs:
           python apps/platform/test_http.py
           python apps/platform/test_browser.py
           python apps/platform/test_cancel.py
+          python apps/platform/test_worker_recovery.py
 
       - name: Save sample comparison report and order journal
         uses: actions/upload-artifact@v4
