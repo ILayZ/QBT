@@ -49,6 +49,7 @@
 <p id="comparison-message" aria-live="polite"></p>
 <div id="comparison-content" hidden>
 <h3 id="portfolio-title">Portfolio results</h3>
+<p id="comparison-units"></p>
 <div class="comparison-scroll" role="region" aria-labelledby="portfolio-title" tabindex="0">
 <table id="portfolio-table" aria-labelledby="portfolio-title"><thead><tr></tr></thead><tbody></tbody></table>
 </div>
@@ -56,8 +57,10 @@
 <svg id="equity-chart" role="img" aria-labelledby="equity-chart-title" aria-describedby="equity-chart-description"></svg>
 <ul id="equity-legend" aria-label="Portfolio legend"></ul>
 <h3 id="order-title">Order ledger</h3>
-<label for="order-strategy">Ledger portfolio</label>
-<select id="order-strategy"></select>
+<div class="order-filters">
+<label>Ledger portfolio <select id="order-strategy"></select></label>
+<label>Order status <select id="order-status"></select></label>
+</div>
 <p id="order-range" aria-live="polite"></p>
 <div class="comparison-scroll" role="region" aria-labelledby="order-title" tabindex="0">
 <table id="order-table" aria-labelledby="order-title"><thead><tr></tr></thead><tbody></tbody></table>
