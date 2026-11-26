@@ -1,3 +1,12 @@
+mod dca;
+mod dip_dca;
+mod indicators;
+mod momentum_sma;
+mod regime_switch;
+mod vol_adjusted_dca;
+
+pub use indicators::{detect_regime, rolling_vol, sma};
+
 use crate::data::PriceSeries;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -82,58 +91,6 @@ pub trait StrategyEngine: Send + Sync {
     fn generate_signals(&self, series: &PriceSeries, params: &HashMap<String, f64>) -> Vec<Signal>;
 }
 
-/// Simple SMA calculator
-pub fn sma(series: &[f64], window: usize) -> Vec<f64> {
-    if window == 0 || series.len() < window {
-        return vec![f64::NAN; series.len()];
-    }
-    let mut result = vec![f64::NAN; series.len()];
-    let mut sum: f64 = 0.0;
-    for i in 0..series.len() {
-        sum += series[i];
-        if i >= window {
-            sum -= series[i - window];
-        }
-        if i >= window - 1 {
-            result[i] = sum / window as f64;
-        }
-    }
-    result
-}
-
-/// Volatility (rolling standard deviation of returns)
-pub fn rolling_vol(series: &[f64], window: usize) -> Vec<f64> {
-    if window == 0 || series.len() < 2 {
-        return vec![f64::NAN; series.len()];
-    }
-    let rets: Vec<f64> = series.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
-    let mut result = vec![f64::NAN; series.len()];
-    for i in window..series.len() {
-        let chunk = &rets[i - window..i];
-        let mean = chunk.iter().sum::<f64>() / window as f64;
-        let variance = chunk.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / window as f64;
-        result[i] = variance.sqrt();
-    }
-    result
-}
-
-/// Detect market regime based on SMA crossovers
-pub fn detect_regime(fast_sma: &[f64], slow_sma: &[f64], idx: usize) -> Regime {
-    if idx >= fast_sma.len() || fast_sma[idx].is_nan() || slow_sma[idx].is_nan() {
-        return Regime::Sideways;
-    }
-    let fast = fast_sma[idx];
-    let slow = slow_sma[idx];
-    let diff = (fast - slow) / slow;
-    if diff > 0.02 {
-        Regime::Bull
-    } else if diff < -0.02 {
-        Regime::Bear
-    } else {
-        Regime::Sideways
-    }
-}
-
 impl Strategy {
     pub fn name(&self) -> &str {
         match self {
@@ -147,115 +104,40 @@ impl Strategy {
     }
 
     pub fn generate_signals(&self, series: &PriceSeries) -> Vec<Signal> {
-        let closes = series.closes();
         match self {
             Strategy::DipDCA {
                 lookback_hours,
                 drop_fraction,
                 ..
-            } => {
-                let mut signals = vec![Signal::Hold; closes.len()];
-                // Keep candidate peak indices in descending price order.
-                let mut peaks = std::collections::VecDeque::<usize>::new();
-                for (i, &close) in closes.iter().enumerate() {
-                    let start = (i + 1).saturating_sub(*lookback_hours);
-                    while peaks.front().is_some_and(|&j| j < start) {
-                        peaks.pop_front();
-                    }
-                    while peaks.back().is_some_and(|&j| closes[j] <= close) {
-                        peaks.pop_back();
-                    }
-                    peaks.push_back(i);
-                    if i + 1 >= *lookback_hours && close <= closes[peaks[0]] * (1.0 - drop_fraction)
-                    {
-                        signals[i] = Signal::BuyReserve;
-                    }
-                }
-                signals
-            }
+            } => dip_dca::signals(&series.closes(), *lookback_hours, *drop_fraction),
             Strategy::DCA {
                 interval_hours,
                 amount,
-            } => {
-                // Emit a signal for EVERY bar (Buy on interval boundaries, Hold otherwise)
-                // so the signal vector is the same length as the price series.
-                let interval = *interval_hours as usize;
-                if interval == 0 {
-                    // Return all Hold signals rather than panic on division by zero
-                    return vec![Signal::Hold; closes.len()];
-                }
-                let mut signals = Vec::with_capacity(closes.len());
-                for i in 0..closes.len() {
-                    if i % interval == 0 {
-                        signals.push(Signal::Buy { amount: *amount });
-                    } else {
-                        signals.push(Signal::Hold);
-                    }
-                }
-                signals
-            }
+            } => dca::signals(series.len(), *interval_hours, *amount),
             Strategy::MomentumSMA {
                 lookback,
                 buy_threshold,
                 sell_threshold,
-            } => {
-                let sma_vals = sma(&closes, *lookback as usize);
-                let mut signals = Vec::with_capacity(closes.len());
-                for i in 0..closes.len() {
-                    let price = closes[i];
-                    let average = sma_vals[i];
-                    if price > average * (1.0 + buy_threshold) {
-                        signals.push(Signal::Buy { amount: 100.0 });
-                    } else if price < average * (1.0 - sell_threshold) {
-                        signals.push(Signal::Sell { amount: SELL_ALL });
-                    } else {
-                        signals.push(Signal::Hold);
-                    }
-                }
-                signals
-            }
+            } => momentum_sma::signals(&series.closes(), *lookback, *buy_threshold, *sell_threshold),
             Strategy::VolAdjustedDCA {
                 base_amount,
                 vol_lookback,
                 vol_multiplier_max,
-            } => {
-                let vols = rolling_vol(&closes, *vol_lookback as usize);
-                let mut signals = Vec::with_capacity(closes.len());
-                for vol in vols {
-                    if vol.is_nan() {
-                        signals.push(Signal::Hold);
-                    } else {
-                        let mult = (vol * 10.0).min(*vol_multiplier_max);
-                        let amount = base_amount * (1.0 + mult);
-                        signals.push(Signal::Buy { amount });
-                    }
-                }
-                signals
-            }
+            } => vol_adjusted_dca::signals(
+                &series.closes(),
+                *base_amount,
+                *vol_lookback,
+                *vol_multiplier_max,
+            ),
             Strategy::RegimeSwitch {
                 fast_sma,
                 slow_sma,
                 buy_regime,
                 sell_regime,
-            } => {
-                let fast_vals = sma(&closes, *fast_sma as usize);
-                let slow_vals = sma(&closes, *slow_sma as usize);
-                let mut signals = Vec::with_capacity(closes.len());
-                for i in 0..closes.len() {
-                    let regime = detect_regime(&fast_vals, &slow_vals, i);
-                    if regime == *buy_regime {
-                        signals.push(Signal::Buy { amount: 100.0 });
-                    } else if regime == *sell_regime {
-                        signals.push(Signal::Sell { amount: SELL_ALL });
-                    } else {
-                        signals.push(Signal::Hold);
-                    }
-                }
-                signals
-            }
+            } => regime_switch::signals(&series.closes(), *fast_sma, *slow_sma, *buy_regime, *sell_regime),
             Strategy::Custom { .. } => {
                 // Placeholder for custom strategies
-                vec![Signal::Hold; closes.len()]
+                vec![Signal::Hold; series.len()]
             }
         }
     }
