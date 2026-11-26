@@ -11,5 +11,8 @@ path = "src/main.rs"
 anyhow.workspace = true
 argh = "0.1"
 qbt-engine = { path = "../../crates/qbt-engine" }
-serde_json.workspace = true
+same-file = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

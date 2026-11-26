@@ -2601,8 +2601,11 @@ dependencies = [
  "anyhow",
  "argh",
  "qbt-engine",
+ "same-file",
+ "serde",
  "serde_json",
  "tracing-subscriber",
+ "xxhash-rust",
 ]
 
 [[package]]

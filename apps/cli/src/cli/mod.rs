@@ -1,7 +1,9 @@
 use anyhow::Result;
 use argh::FromArgs;
 use qbt_engine::run::{BUILTINS, RunSpec, builtin_strategy};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use crate::manifest::{RunManifest, distinct_paths};
 
 /// QBT - High-performance quantitative backtesting engine
 #[derive(FromArgs)]
@@ -16,6 +18,8 @@ pub struct Cli {
 pub enum Command {
     /// Run a backtest on a price series
     Run(RunArgs),
+    /// Replay a saved run
+    Replay(ReplayArgs),
     /// Evaluate fixed parameters across independent time windows
     WalkForward(WalkForwardArgs),
     /// Generate HTML report
@@ -34,6 +38,9 @@ pub struct RunArgs {
     /// output report path
     #[argh(option, default = r#"std::path::PathBuf::from("report.html")"#)]
     pub output: PathBuf,
+    /// save a reproducible JSON run manifest
+    #[argh(option)]
+    pub save_manifest: Option<PathBuf>,
     /// trailing hourly closes used by DipDCA
     #[argh(option, default = "168")]
     pub dip_lookback: usize,
@@ -76,6 +83,24 @@ pub struct RunArgs {
     /// risk-free rate (annual)
     #[argh(option, default = r#"0.03"#)]
     pub risk_free: f64,
+}
+
+/// Replay a saved run against its original dataset
+#[derive(FromArgs)]
+#[argh(subcommand, name = "replay")]
+pub struct ReplayArgs {
+    /// saved JSON run manifest
+    #[argh(option)]
+    pub manifest: PathBuf,
+    /// input CSV file (OHLCV)
+    #[argh(option)]
+    pub input: PathBuf,
+    /// output report path
+    #[argh(option, default = r#"PathBuf::from("report.html")"#)]
+    pub output: PathBuf,
+    /// optional order ledger CSV
+    #[argh(option)]
+    pub ledger: Option<PathBuf>,
 }
 
 /// Evaluate fixed parameters across independent time windows
@@ -136,8 +161,6 @@ impl RunArgs {
     pub fn execute(&self) -> Result<()> {
         use qbt_engine::backtest::{BacktestConfig, BuyBudget};
         use qbt_engine::data::PriceSeries;
-        use qbt_engine::report::HtmlReport;
-        use std::io::{BufWriter, Write};
 
         // CF-017: Validate positive intervals and parameters at CLI boundary
         if self.dca_interval == 0 {
@@ -198,52 +221,79 @@ impl RunArgs {
             budget,
             include_benchmarks: self.strategy.eq_ignore_ascii_case("all"),
         };
-        anyhow::ensure!(
-            self.ledger.as_ref() != Some(&self.output) && self.ledger.as_ref() != Some(&self.input),
-            "Choose a separate ledger path"
-        );
-        let mut ledger = self
-            .ledger
-            .as_ref()
-            .map(std::fs::File::create)
-            .transpose()?
-            .map(BufWriter::new);
+        distinct_paths(&self.input, &self.output, self.ledger.as_deref(), self.save_manifest.as_deref())?;
+        if let Some(path) = &self.save_manifest {
+            anyhow::ensure!(!path.try_exists()?, "Choose a new manifest path");
+            let manifest = RunManifest::new(&series, spec)?;
+            render(&manifest.spec, &series, &self.output, self.ledger.as_deref())?;
+            manifest.save(path)?;
+        } else {
+            render(&spec, &series, &self.output, self.ledger.as_deref())?;
+        }
+        Ok(())
+    }
+}
+
+impl ReplayArgs {
+    pub fn execute(&self) -> Result<()> {
+        use qbt_engine::data::PriceSeries;
+
+        distinct_paths(&self.input, &self.output, self.ledger.as_deref(), Some(&self.manifest))?;
+        let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
+        let manifest = RunManifest::load(&self.manifest)?;
+        manifest.verify(&series)?;
+        render(&manifest.spec, &series, &self.output, self.ledger.as_deref())
+    }
+}
+
+fn render(
+    spec: &RunSpec,
+    series: &qbt_engine::data::PriceSeries,
+    output: &Path,
+    ledger_path: Option<&Path>,
+) -> Result<()> {
+    use qbt_engine::report::HtmlReport;
+    use std::io::{BufWriter, Write};
+
+    let mut ledger = ledger_path
+        .map(std::fs::File::create)
+        .transpose()?
+        .map(BufWriter::new);
+    if let Some(w) = &mut ledger {
+        writeln!(
+            w,
+            "strategy,signal_time,execution_time,side,status,price,quantity,fee,cash"
+        )?;
+    }
+    let results = spec.execute(series, |name, e| {
         if let Some(w) = &mut ledger {
             writeln!(
                 w,
-                "strategy,signal_time,execution_time,side,status,price,quantity,fee,cash"
+                "{},{},{},{},{},{},{},{},{}",
+                name,
+                e.signal_time.to_rfc3339(),
+                e.execution_time.to_rfc3339(),
+                e.side,
+                e.status,
+                e.price,
+                e.quantity,
+                e.fee,
+                e.cash
             )?;
         }
-        let results = spec.execute(&series, |name, e| {
-            if let Some(w) = &mut ledger {
-                writeln!(
-                    w,
-                    "{},{},{},{},{},{},{},{},{}",
-                    name,
-                    e.signal_time.to_rfc3339(),
-                    e.execution_time.to_rfc3339(),
-                    e.side,
-                    e.status,
-                    e.price,
-                    e.quantity,
-                    e.fee,
-                    e.cash
-                )?;
-            }
-            Ok(())
-        })?;
-        if let Some(w) = &mut ledger {
-            w.flush()?;
-        }
-        if spec.include_benchmarks {
-            HtmlReport::comparison(&results, &self.output)?;
-        } else {
-            HtmlReport::generate(&results, &self.output)?;
-        }
-
-        println!("Report written to {}", self.output.display());
         Ok(())
+    })?;
+    if let Some(w) = &mut ledger {
+        w.flush()?;
     }
+    if spec.include_benchmarks {
+        HtmlReport::comparison(&results, output)?;
+    } else {
+        HtmlReport::generate(&results, output)?;
+    }
+
+    println!("Report written to {}", output.display());
+    Ok(())
 }
 
 impl WalkForwardArgs {
