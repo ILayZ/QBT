@@ -299,6 +299,20 @@ class WorkerRecoveryTest(unittest.TestCase):
         self.assertFalse(process_is_running(pid))
         self.assertIsNone(worker.poll())
 
+    def test_blocked_heartbeat_stops_cli_and_leaves_an_attempt_to_recover(self):
+        first, pid = self.start_worker("held")
+        with connect() as locker:
+            self.lock_run(locker)
+            wait_until(lambda: not process_is_running(pid))
+            self.assertIsNone(first.poll())
+            self.assertEqual(self.artifacts(), {})
+            self.stop_worker(first)
+            self.expire_lease_in(locker)
+        self.start_worker("replacement")
+        wait_until(lambda: self.run_state()["state"] == "succeeded")
+        self.assertEqual(self.run_state()["attempts"], 2)
+        self.assert_artifacts("replacement")
+
     def test_timeout_kills_cli_and_records_failure(self):
         worker, pid = self.start_worker("held", timeout=1)
         wait_until(lambda: self.run_state()["state"] == "failed")
