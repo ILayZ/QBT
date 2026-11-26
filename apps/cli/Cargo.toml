@@ -1,0 +1,15 @@
+[package]
+name = "qbt-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "qbt"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+argh = "0.1"
+qbt-engine = { path = "../../crates/qbt-engine" }
+serde_json.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

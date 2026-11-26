@@ -2595,11 +2595,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "qbt"
+name = "qbt-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "argh",
+ "qbt-engine",
+ "serde_json",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "qbt-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "arrow",
  "chrono",
  "config",
@@ -2615,7 +2625,6 @@ dependencies = [
  "statrs",
  "thiserror 1.0.69",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

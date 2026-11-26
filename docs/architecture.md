@@ -15,11 +15,11 @@ Start with a modular API and a separately runnable worker in the same repository
 | PostgreSQL | Project membership, dataset versions, run specifications, states, leases, summary metrics and artifact references | Transactional source of truth for visibility and job ownership |
 | Object storage | Immutable input snapshots, order ledger, equity curves and optional HTML exports | Private objects accessed through authorized, short-lived URLs |
 
-The local CLI reads local files and calls the same library directly. Keep database, HTTP and job types outside the simulation modules. Begin with the existing Rust package. Extract a workspace crate when a second consumer needs independent packaging.
+The local CLI reads local files and calls the same library directly. Keep database, HTTP and job types outside the simulation modules. The Cargo workspace contains the library in `crates/qbt-engine` and the `qbt` binary in `apps/cli`. Add the API, worker and web application under `apps/` as they are implemented. Each deployable has its own build target.
 
 ## Contract between platform and engine
 
-Introduce a versioned `RunSpec` and a library entry point shared by the CLI and worker. Extract strategy construction and comparison orchestration from `src/cli/mod.rs`. Keep fills and accounting in `src/backtest`, signals in `src/strategy`, metrics in `src/metrics` and HTML generation in `src/report`. A registry supplies strategy IDs, parameter types, ranges and defaults to both the CLI and the API.
+Introduce a versioned `RunSpec` and a library entry point shared by the CLI and worker. Extract strategy construction and comparison orchestration from `apps/cli/src/cli/mod.rs`. Within `crates/qbt-engine`, keep fills and accounting in `src/backtest`, signals in `src/strategy`, metrics in `src/metrics` and HTML generation in `src/report`. A registry supplies strategy IDs, parameter types, ranges and defaults to both the CLI and the API.
 
 Persist a fully resolved spec when accepting a run. Include schema version, engine build/commit, dataset version and normalized content hash, symbol, timeframe, UTC range, mode, strategy IDs and parameters, initial capital, order sizing, fees, slippage, risk-free rate, minimum notional and daily budget including its fee policy. Include benchmark and window settings when applicable. A worker must claim only builds it can execute. Store the effective spec with the result so a later change to defaults cannot alter a replay.
 

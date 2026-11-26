@@ -55,13 +55,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Build
         run: cargo build --release --locked
 
       - name: Run tests
-        run: cargo test --release --locked
+        run: cargo test --workspace --release --locked
 
       - name: Show binary
         run: |
