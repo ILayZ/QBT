@@ -65,8 +65,8 @@ jobs:
 
       - name: Show binary
         run: |
-          ls -lh target/release/qbacktest
-          file target/release/qbacktest
+          ls -lh target/release/qbt
+          file target/release/qbt
 
   e2e:
     name: E2E Smoke Test

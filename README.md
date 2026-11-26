@@ -1,9 +1,11 @@
-# qbacktest
+# QBT
 
 **A fast, scriptable, reproducible backtesting engine for retail traders and quant hobbyists.**
 
 Run a strategy over your own OHLCV data in seconds, get risk-adjusted metrics and a
 self-contained HTML report — no cloud subscription, no lock-in, no waiting.
+
+QBT is the simulation engine for a strategy-testing platform. See the [platform architecture](docs/architecture.md) for the proposed service boundaries, run contract and delivery plan.
 
 ## Why
 
@@ -12,7 +14,7 @@ Most retail traders who want to backtest a strategy are forced into either:
 - Heavy cloud platforms (paid, slow, closed source), or
 - Complex Python notebooks (dependency hell, slow on large data).
 
-`qbacktest` is a single, self-contained CLI binary. It reads CSV or Parquet, runs a
+`qbt` is a single, self-contained CLI binary. It reads CSV or Parquet, runs a
 strategy, computes standard performance and risk metrics, and writes an HTML report.
 Fast, reproducible, and yours.
 
@@ -31,20 +33,20 @@ Fast, reproducible, and yours.
 Build from source (requires Rust stable):
 
 ```bash
-git clone <repo-url> qbacktest
-cd qbacktest
+git clone <repo-url> qbt
+cd qbt
 cargo build --release
-# binary at: target/release/qbacktest
+# binary at: target/release/qbt
 ```
 
 ## Quick start
 
 ```bash
 # List available strategies
-qbacktest strategies --verbose
+qbt strategies --verbose
 
 # Run a DCA backtest on hourly OHLCV data
-qbacktest run \
+qbt run \
   --input data/sample_btc_1h.csv \
   --strategy DCA \
   --dca-interval 24 \
@@ -54,7 +56,7 @@ qbacktest run \
   --output report.html
 
 # Walk-forward validation of a momentum strategy
-qbacktest walk-forward \
+qbt walk-forward \
   --input data/sample_btc_1h.csv \
   --strategy MomentumSMA \
   --train 1 --test 1 --step 1 \
@@ -85,7 +87,7 @@ A ready-to-use 180-day sample dataset is included at `data/sample_btc_1h.csv`.
 |------|---------|-------------|
 | `--input` | *(required)* | Input CSV/Parquet (OHLCV) |
 | `--output` | `report.html` | Output HTML report path |
-| `--strategy` | `DCA` | `DCA`, `MomentumSMA`, or `VolAdjustedDCA` |
+| `--strategy` | `DCA` | `DCA`, `DipDCA`, `MomentumSMA`, `VolAdjustedDCA`, `RegimeSwitch`, or `all` |
 | `--dca-interval` | `24` | DCA interval in hours |
 | `--dca-amount` | `100` | DCA amount per interval |
 | `--capital` | `10000` | Initial capital |
@@ -96,7 +98,7 @@ A ready-to-use 180-day sample dataset is included at `data/sample_btc_1h.csv`.
 Compare all five strategies on independent accounts funded once at the start:
 
 ```bash
-qbacktest run --input data/sample_btc_1h.csv --strategy all --capital 1800 \
+qbt run --input data/sample_btc_1h.csv --strategy all --capital 1800 \
   --order-amount 10 --daily-limit 10 --ledger orders.csv --output comparison.html
 ```
 
@@ -123,7 +125,7 @@ to the five strategies.
 ### DipDCA
 
 ```bash
-qbacktest run --input data/sample_btc_1h.csv --strategy DipDCA --capital 1800 \
+qbt run --input data/sample_btc_1h.csv --strategy DipDCA --capital 1800 \
   --order-amount 10 --dip-percent 5 --dip-lookback 168 --min-notional 1 --ledger dip.csv
 ```
 

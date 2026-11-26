@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# qbacktest end-to-end verification harness
+# QBT end-to-end verification harness
 # Runs the release binary against sample data and asserts tangible outputs.
 # Usage: ./scripts/e2e_verify.sh [path-to-binary]
 set -uo pipefail
 
-BIN="${1:-target/release/qbacktest}"
+BIN="${1:-target/release/qbt}"
 DATA="data/sample_btc_1h.csv"
 OUT_DIR=".e2e"
 mkdir -p "$OUT_DIR"
@@ -13,7 +13,7 @@ pass=0; fail=0
 ok()   { echo "  [PASS] $1"; pass=$((pass+1)); }
 bad()  { echo "  [FAIL] $1"; fail=$((fail+1)); }
 
-echo "== qbacktest E2E =="
+echo "== QBT E2E =="
 
 # 0. Binary exists and is executable
 if [[ -x "$BIN" ]]; then ok "binary present: $BIN"; else bad "binary missing: $BIN (build not finished?)"; fi

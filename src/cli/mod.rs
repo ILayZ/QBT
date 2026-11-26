@@ -2,7 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use std::path::PathBuf;
 
-/// QBacktest - High-performance quantitative backtesting engine
+/// QBT - High-performance quantitative backtesting engine
 #[derive(FromArgs)]
 pub struct Cli {
     /// subcommand

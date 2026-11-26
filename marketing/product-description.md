@@ -1,4 +1,4 @@
-# qbacktest — Marketplace / Directory Listing Pack
+# QBT — Marketplace / Directory Listing Pack
 
 > **STATUS: READY. NOT PUBLISHED.**
 > Publishing, account creation, and outreach require explicit human authorization (blocker B2).
@@ -8,7 +8,7 @@
 
 ## Short product description (for marketplaces / directories)
 
-**qbacktest** is a fast, scriptable, reproducible backtesting engine for retail traders and
+**QBT** is a fast, scriptable, reproducible backtesting engine for retail traders and
 quant hobbyists. A single Rust CLI binary reads CSV or Parquet, runs a strategy (DCA, MomentumSMA,
 VolAdjustedDCA, or your own), computes standard risk-adjusted metrics (Sharpe, Sortino, max
 drawdown, profit factor), and outputs a self-contained HTML report — no cloud, no subscriptions,
