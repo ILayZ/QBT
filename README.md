@@ -39,7 +39,7 @@ cargo build --release
 # binary at: target/release/qbt
 ```
 
-The [local HTTP service](apps/platform/README.md) accepts CSV datasets, queues runs and serves reports, order ledgers and replay manifests.
+The [local HTTP service](apps/platform/README.md) validates and catalogs CSV and Parquet datasets, queues runs and serves reports, order ledgers and replay manifests.
 
 ## Repository layout
 
@@ -78,12 +78,12 @@ timestamp,open,high,low,close,volume
 2024-01-01T00:00:00Z,42000.00,42014.52,41968.55,41977.89,1280.79
 ```
 
-- `timestamp`: ISO 8601 UTC datetime. Backtests require consecutive hourly bars in chronological order.
+- `timestamp` is an ISO 8601 datetime. QBT normalizes timestamps to UTC and requires consecutive hourly bars in ascending order.
 - A signal uses the current close and fills at the following open when funds and position allow. Equity is valued at each close. The final close signal expires.
-- `open`, `high`, `low`, `close`, `volume`: floating point values.
-- Parquet is also supported (same column names; `timestamp` as datetime).
+- Prices must be finite and positive. The low and high must contain both the open and the close. Volume must be finite and nonnegative.
+- Parquet uses the same column names with a datetime `timestamp` column.
 
-A ready-to-use 180-day sample dataset is included at `data/sample_btc_1h.csv`.
+The sample at `data/sample_btc_1h.csv` contains 4,320 hourly bars. Run `qbt inspect-dataset --input data/sample_btc_1h.csv` to validate the file and print its schema version, timeframe, row count and UTC coverage as JSON.
 
 ## Commands
 
@@ -92,6 +92,8 @@ A ready-to-use 180-day sample dataset is included at `data/sample_btc_1h.csv`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--input` | *(required)* | Input CSV/Parquet (OHLCV) |
+| `--symbol` | *(optional)* | Market symbol for the summary and manifest |
+| `--quote-currency` | *(optional)* | Quote currency for the summary and manifest |
 | `--output` | `report.html` | Output HTML report path |
 | `--strategy` | `DCA` | `DCA`, `DipDCA`, `MomentumSMA`, `VolAdjustedDCA`, `RegimeSwitch`, or `all` |
 | `--dca-interval` | `24` | DCA interval in hours |

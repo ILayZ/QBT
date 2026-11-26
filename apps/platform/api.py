@@ -1,4 +1,7 @@
 import hashlib
+import json
+import subprocess
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
@@ -11,10 +14,17 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from shared import ARTIFACTS, build_id, connect, initialize
+from shared import ARTIFACTS, BINARY, build_id, connect, initialize
 
 MAX_BYTES = 8 * 1024 * 1024
 LOCAL_RUN_SCOPE = "local"
+DATASET_FORMATS = {
+    "text/csv": "csv",
+    "application/vnd.apache.parquet": "parquet",
+}
+DATASET_FIELDS = "id, format, symbol, quote_currency, validation"
+DatasetID = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+DatasetLabel = Annotated[str | None, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")]
 
 
 class Options(BaseModel):
@@ -36,7 +46,7 @@ class Options(BaseModel):
 
 class Submission(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    dataset: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    dataset: DatasetID
     options: Options = Field(default_factory=Options)
 
 
@@ -64,25 +74,89 @@ def run_options():
     return Options.model_json_schema()
 
 
-def store_dataset(content):
-    dataset = hashlib.sha256(content).hexdigest()
+def inspect_dataset(content, file_format):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"input.{file_format}"
+        path.write_bytes(content)
+        try:
+            result = subprocess.run([str(BINARY), "inspect-dataset", "--input", str(path)],
+                                    capture_output=True, text=True, errors="replace", timeout=30)
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(503, "Dataset validation timed out") from exc
+    if result.returncode:
+        diagnostic = result.stderr.removeprefix("Error: ").strip()
+        raise HTTPException(422, diagnostic[:2000] or "Invalid dataset")
+    return json.loads(result.stdout)
+
+
+def dataset_metadata(row):
+    validation = row.pop("validation")
+    return {**row, **(validation or dict.fromkeys(("schema_version", "timeframe", "row_count", "start", "end")))}
+
+
+def store_dataset(content, file_format, symbol, quote_currency):
+    dataset_id = hashlib.sha256(content).hexdigest()
     with connect() as db:
-        db.execute("INSERT INTO qbt_datasets VALUES (%s, %s) ON CONFLICT DO NOTHING", (dataset, content))
-    return {"id": dataset}
+        row = db.execute(f"SELECT {DATASET_FIELDS} FROM qbt_datasets WHERE id = %s", (dataset_id,)).fetchone()
+    if row and row["format"] == file_format and row["validation"] is not None:
+        if symbol is None and quote_currency is None:
+            return dataset_metadata(row)
+        validation = row["validation"]
+    else:
+        validation = inspect_dataset(content, file_format)
+
+    with connect() as db:
+        # Backfill missing metadata even if a concurrent upload recorded the hash.
+        row = db.execute(f"""
+            INSERT INTO qbt_datasets (id, csv, format, symbol, quote_currency, validation)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                format = EXCLUDED.format,
+                symbol = COALESCE(qbt_datasets.symbol, EXCLUDED.symbol),
+                quote_currency = COALESCE(qbt_datasets.quote_currency, EXCLUDED.quote_currency),
+                validation = COALESCE(qbt_datasets.validation, EXCLUDED.validation)
+            WHERE (qbt_datasets.validation IS NULL OR qbt_datasets.format = EXCLUDED.format)
+                AND (qbt_datasets.symbol IS NULL OR EXCLUDED.symbol IS NULL
+                     OR qbt_datasets.symbol = EXCLUDED.symbol)
+                AND (qbt_datasets.quote_currency IS NULL OR EXCLUDED.quote_currency IS NULL
+                     OR qbt_datasets.quote_currency = EXCLUDED.quote_currency)
+            RETURNING {DATASET_FIELDS}
+        """, (dataset_id, content, file_format, symbol, quote_currency, Jsonb(validation))).fetchone()
+        if row is None:
+            raise HTTPException(409, "Conflicting metadata for this dataset")
+    return dataset_metadata(row)
 
 
 @app.post("/v1/datasets", status_code=201)
-async def upload(request: Request):
-    if request.headers.get("content-type", "").split(";")[0].strip() != "text/csv":
-        raise HTTPException(415, "Expected text/csv")
+async def upload(request: Request, symbol: DatasetLabel = None, quote_currency: DatasetLabel = None):
+    media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    file_format = DATASET_FORMATS.get(media_type)
+    if file_format is None:
+        raise HTTPException(415, "Expected text/csv or application/vnd.apache.parquet")
     content = bytearray()
     async for chunk in request.stream():
         if len(content) + len(chunk) > MAX_BYTES:
-            raise HTTPException(413, "CSV exceeds 8 MiB")
+            raise HTTPException(413, "Dataset exceeds 8 MiB")
         content.extend(chunk)
     if not content:
         raise HTTPException(422, "Empty dataset")
-    return await run_in_threadpool(store_dataset, bytes(content))
+    return await run_in_threadpool(store_dataset, bytes(content), file_format, symbol, quote_currency)
+
+
+@app.get("/v1/datasets")
+def list_datasets():
+    with connect() as db:
+        rows = db.execute(f"SELECT {DATASET_FIELDS} FROM qbt_datasets ORDER BY id").fetchall()
+    return {"datasets": [dataset_metadata(row) for row in rows]}
+
+
+@app.get("/v1/datasets/{dataset_id}")
+def get_dataset(dataset_id: DatasetID):
+    with connect() as db:
+        row = db.execute(f"SELECT {DATASET_FIELDS} FROM qbt_datasets WHERE id = %s", (dataset_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Unknown dataset")
+    return dataset_metadata(row)
 
 
 @app.post("/v1/runs", status_code=202)
@@ -144,7 +218,8 @@ def list_runs(limit: Annotated[int, Query(ge=1, le=100)] = 20, before: UUID | No
 def status(run_id: UUID):
     with connect() as db:
         row = db.execute("""
-            SELECT id, dataset, options, build, state, error FROM qbt_runs WHERE id = %s
+            SELECT r.id, r.dataset, r.options, r.build, r.state, r.error, d.symbol, d.quote_currency
+            FROM qbt_runs r JOIN qbt_datasets d ON d.id = r.dataset WHERE r.id = %s
         """, (run_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Unknown run")

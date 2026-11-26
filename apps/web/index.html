@@ -10,8 +10,18 @@
 <div class="layout">
 <form id="run-form">
 <h2>New run</h2>
-<label>Market data <input type="file" id="file" accept=".csv,text/csv" required aria-describedby="file-note"></label>
-<small id="file-note">Hourly OHLCV · CSV up to 8 MiB</small>
+<label for="dataset">Saved dataset</label>
+<select id="dataset" aria-describedby="dataset-note"><option value="">Choose a saved dataset</option></select>
+<small id="dataset-note"></small>
+<label>Market data <input type="file" id="file" accept=".csv,.parquet,text/csv,application/vnd.apache.parquet" aria-describedby="file-note"></label>
+<small id="file-note">Upload hourly OHLCV data in CSV or Parquet, up to 8 MiB.</small>
+<details>
+<summary>Upload metadata</summary>
+<div class="fields">
+<label>Symbol <input id="symbol" maxlength="64" placeholder="Optional"></label>
+<label>Quote currency <input id="quote-currency" maxlength="64" placeholder="Optional"></label>
+</div>
+</details>
 <label for="strategy">Strategy</label>
 <select id="strategy" name="strategy" required><option value="">Loading…</option></select>
 <div class="fields">

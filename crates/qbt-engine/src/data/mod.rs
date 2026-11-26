@@ -1,8 +1,9 @@
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use anyhow::{Context, Result, bail, ensure};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::Arc;
 
 /// OHLCV bar data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,17 +34,64 @@ pub struct PriceSeries {
 }
 
 impl PriceSeries {
-    pub(crate) fn validate_hourly(&self) -> Result<()> {
-        for pair in self.bars.windows(2) {
-            if pair[1].timestamp - pair[0].timestamp != chrono::Duration::hours(1) {
-                anyhow::bail!(
-                    "Expected consecutive hourly bars, found {} followed by {}",
-                    pair[0].timestamp,
-                    pair[1].timestamp
+    /// Validate a single series of consecutive hourly OHLCV bars.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(!self.is_empty(), "Price series has no bars");
+        for (i, pair) in self.bars.windows(2).enumerate() {
+            let [previous, next] = [pair[0].timestamp, pair[1].timestamp];
+            let position = i + 2;
+            ensure!(
+                next != previous,
+                "Bar {position}: duplicate timestamp {next}"
+            );
+            ensure!(
+                next > previous,
+                "Bar {position}: timestamp {next} is out of order after {previous}"
+            );
+            ensure!(
+                next - previous == chrono::Duration::hours(1),
+                "Bar {position}: expected consecutive hourly bars, found {previous} followed by {next}"
+            );
+        }
+        for (i, bar) in self.bars.iter().enumerate() {
+            let position = i + 1;
+            for (name, value) in [
+                ("open", bar.open),
+                ("high", bar.high),
+                ("low", bar.low),
+                ("close", bar.close),
+            ] {
+                ensure!(
+                    value.is_finite() && value > 0.0,
+                    "Bar {position}: {name} must be finite and positive (found {value})"
                 );
             }
+            ensure!(
+                bar.low <= bar.open.min(bar.close) && bar.high >= bar.open.max(bar.close),
+                "Bar {position}: low and high must bound open and close"
+            );
+            ensure!(
+                bar.volume.is_finite() && bar.volume >= 0.0,
+                "Bar {position}: volume must be finite and nonnegative (found {})",
+                bar.volume
+            );
         }
         Ok(())
+    }
+
+    /// Load and validate OHLCV data. A .parquet extension selects Parquet.
+    pub fn from_path(path: &Path, symbol: String) -> Result<Self> {
+        let series = if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"))
+        {
+            Self::from_parquet(path, symbol)
+        } else {
+            Self::from_csv(path, symbol)
+        }?;
+        series.validate()?;
+        Ok(series)
     }
 
     pub fn len(&self) -> usize {
@@ -100,31 +148,28 @@ impl PriceSeries {
     }
 
     pub fn from_dataframe(df: DataFrame, symbol: String) -> Result<Self> {
-        let timestamp_col = df.column("timestamp")?.datetime()?;
-        let time_unit = timestamp_col.time_unit();
-        let open_col = df.column("open")?.f64()?;
-        let high_col = df.column("high")?.f64()?;
-        let low_col = df.column("low")?.f64()?;
-        let close_col = df.column("close")?.f64()?;
-        let volume_col = df.column("volume")?.f64()?;
+        let timestamp_col = df.column("timestamp").context("Missing timestamp column")?;
+        let open_col = numeric_column(&df, "open")?;
+        let high_col = numeric_column(&df, "high")?;
+        let low_col = numeric_column(&df, "low")?;
+        let close_col = numeric_column(&df, "close")?;
+        let volume_col = numeric_column(&df, "volume")?;
 
         let mut bars = Vec::with_capacity(df.height());
         for i in 0..df.height() {
-            let ts = timestamp_col.get(i).context("missing timestamp")?;
-            // Normalize to milliseconds regardless of the column's time unit.
-            let millis = match time_unit {
-                TimeUnit::Milliseconds => ts,
-                TimeUnit::Microseconds => ts / 1_000,
-                TimeUnit::Nanoseconds => ts / 1_000_000,
+            let get = |column: &Float64Chunked| {
+                column
+                    .get(i)
+                    .with_context(|| format!("Bar {}: missing {}", i + 1, column.name()))
             };
-            let dt = DateTime::from_timestamp_millis(millis).context("invalid timestamp")?;
             bars.push(Bar {
-                timestamp: dt,
-                open: open_col.get(i).context("missing open")?,
-                high: high_col.get(i).context("missing high")?,
-                low: low_col.get(i).context("missing low")?,
-                close: close_col.get(i).context("missing close")?,
-                volume: volume_col.get(i).context("missing volume")?,
+                timestamp: read_timestamp(timestamp_col, i)
+                    .with_context(|| format!("Bar {}: invalid timestamp", i + 1))?,
+                open: get(&open_col)?,
+                high: get(&high_col)?,
+                low: get(&low_col)?,
+                close: get(&close_col)?,
+                volume: get(&volume_col)?,
             });
         }
 
@@ -133,14 +178,10 @@ impl PriceSeries {
 
     /// Load from CSV file
     pub fn from_csv(path: &Path, symbol: String) -> Result<Self> {
-        let read_options = CsvReadOptions {
-            has_header: true,
-            parse_options: std::sync::Arc::new(
-                polars::prelude::CsvParseOptions::default().with_try_parse_dates(true),
-            ),
-            ..Default::default()
-        };
-        let df = read_options
+        // Preserve timestamp precision and identify the offending bar on parse errors.
+        let timestamp = Schema::from_iter([Field::new("timestamp", DataType::String)]);
+        let df = CsvReadOptions::default()
+            .with_schema_overwrite(Some(Arc::new(timestamp)))
             .try_into_reader_with_file_path(Some(path.to_path_buf()))?
             .finish()?;
         Self::from_dataframe(df, symbol)
@@ -158,6 +199,71 @@ impl PriceSeries {
         let mut file = std::fs::File::create(path)?;
         ParquetWriter::new(&mut file).finish(&mut df)?;
         Ok(())
+    }
+}
+
+fn numeric_column(df: &DataFrame, name: &str) -> Result<Float64Chunked> {
+    let column = df
+        .column(name)
+        .with_context(|| format!("Missing {name} column"))?;
+    if let Ok(strings) = column.str() {
+        let parsed = strings
+            .into_iter()
+            .enumerate()
+            .map(|(i, value)| {
+                value
+                    .map(|value| {
+                        value
+                            .trim()
+                            .parse::<f64>()
+                            .with_context(|| format!("Bar {}: {name} must be numeric", i + 1))
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>>>()?;
+        return Ok(Float64Chunked::from_iter_options(name, parsed.into_iter()));
+    }
+    ensure!(
+        column.dtype().is_numeric() || column.dtype().is_decimal(),
+        "{name} must be numeric"
+    );
+    Ok(column.cast(&DataType::Float64)?.f64()?.clone())
+}
+
+fn read_timestamp(column: &Series, index: usize) -> Result<DateTime<Utc>> {
+    match column.dtype() {
+        DataType::Datetime(unit, _) => {
+            let value = column.datetime()?.get(index).context("missing value")?;
+            match unit {
+                TimeUnit::Milliseconds => DateTime::from_timestamp_millis(value),
+                TimeUnit::Microseconds => DateTime::from_timestamp_micros(value),
+                TimeUnit::Nanoseconds => Some(DateTime::from_timestamp_nanos(value)),
+            }
+            .context("timestamp is out of range")
+        }
+        DataType::String => {
+            let value = column.str()?.get(index).context("missing value")?.trim();
+            if let Ok(timestamp) = DateTime::parse_from_rfc3339(value) {
+                return Ok(timestamp.with_timezone(&Utc));
+            }
+            // Older CSVs can omit the UTC offset or use a space separator.
+            let value = value.replace(' ', "T");
+            for format in [
+                "%Y-%m-%dT%H:%M:%S%.f",
+                "%Y-%m-%dT%H:%M",
+                "%Y-%m-%dT%H%M%S%.f",
+                "%Y-%m-%dT%H%M",
+            ] {
+                if let Ok(timestamp) = DateTime::parse_from_str(&value, &format!("{format}%#z")) {
+                    return Ok(timestamp.with_timezone(&Utc));
+                }
+                if let Ok(timestamp) = NaiveDateTime::parse_from_str(&value, format) {
+                    return Ok(timestamp.and_utc());
+                }
+            }
+            bail!("expected an ISO 8601 datetime, found {value:?}")
+        }
+        _ => bail!("expected a datetime column or ISO 8601 datetime strings"),
     }
 }
 

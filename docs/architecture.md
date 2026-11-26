@@ -1,6 +1,6 @@
 # QBT platform architecture
 
-Status: the Rust engine, CLI and first local HTTP API and worker are implemented. The single-user service uses PostgreSQL for its queue and small artifacts, and invokes the pinned CLI executable. Project isolation, object storage and the remaining platform capabilities below describe the target design. See [local service](../apps/platform/README.md).
+Status: the Rust engine, CLI and first local HTTP API and worker are implemented. The single-user service uses PostgreSQL for its validated dataset catalog, queue and small artifacts, and invokes the pinned CLI executable. Project isolation, object storage and the remaining platform capabilities below describe the target design. See [local service](../apps/platform/README.md).
 
 ## Deployment and ownership
 
@@ -23,7 +23,7 @@ The engine exposes `run::RunSpec` for single and comparison runs. It holds resol
 
 Persist a fully resolved spec when accepting a run. Include schema version, engine build/commit, dataset version and normalized content hash, symbol, timeframe, UTC range, mode, strategy IDs and parameters, initial capital, order sizing, fees, slippage, risk-free rate, minimum notional and daily budget including its fee policy. Include benchmark and window settings when applicable. A worker must claim only builds it can execute. Store the effective spec with the result so a later change to defaults cannot alter a replay.
 
-Start with single-symbol consecutive hourly bars. Import CSV or Parquet via the existing data readers. Reject duplicate, missing or unordered bars and invalid OHLCV values before marking a version ready. Record parser/schema version, symbol, quote currency, coverage and row count. A replacement upload creates another version.
+The local catalog validates single-symbol, consecutive hourly bars in CSV or Parquet through the same Rust loader used for execution. It rejects duplicate, missing or unordered bars and invalid OHLCV values before recording the bytes and their SHA-256 ID. Catalog entries include the validation schema version, UTC coverage and row count, along with any supplied symbol and quote currency. An upload with different bytes creates a new entry.
 
 - **Single run:** execute one strategy against one immutable series.
 - **Comparison:** run each selected strategy with its own account on the same bars. Preserve existing cash and buy-and-hold benchmark rules. Include DipDCA's unspent reserve and purchase wait in its result.

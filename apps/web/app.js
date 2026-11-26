@@ -70,7 +70,10 @@ async function refresh() {
     const rowState = el("past-runs").querySelector(`[data-id="${run.id}"] .run-state`);
     if (rowState) rowState.textContent = run.state;
     el("metadata").replaceChildren();
-    for (const [label, value] of [["Run ID",run.id], ["Strategy",run.options.strategy], ["Initial capital",run.options.capital]]) {
+    for (const [label, value] of [["Run ID",run.id], ["Dataset ID",run.dataset],
+      ["Symbol",run.symbol], ["Quote currency",run.quote_currency],
+      ["Strategy",run.options.strategy], ["Initial capital",run.options.capital]]) {
+      if (value == null) continue;
       const key = document.createElement("dt"), item = document.createElement("dd");
       key.textContent = label;
       item.textContent = value;
@@ -111,6 +114,46 @@ el("cancel-run").onclick = async () => {
 el("retry").onclick = refresh;
 if (active) refresh();
 
+const catalog = new Map();
+const datasetSelect = el("dataset");
+
+function rememberDataset(dataset) {
+  const name = [dataset.symbol, dataset.quote_currency].filter(Boolean).join(" / ");
+  const label = [name, dataset.format.toUpperCase(), dataset.id.slice(0, 12)].filter(Boolean).join(" · ");
+  let option = catalog.get(dataset.id)?.option;
+  if (option) option.text = label;
+  else {
+    option = new Option(label, dataset.id);
+    datasetSelect.add(option);
+  }
+  catalog.set(dataset.id, {dataset, option});
+}
+
+function showCoverage() {
+  const saved = catalog.get(datasetSelect.value)?.dataset;
+  el("dataset-note").textContent = !saved ? "" : saved.schema_version === null
+    ? "Saved before upload validation was introduced."
+    : `${saved.row_count.toLocaleString()} hourly bars · ${saved.start} to ${saved.end}`;
+}
+
+datasetSelect.onchange = () => {
+  if (datasetSelect.value) el("file").value = "";
+  showCoverage();
+};
+
+el("file").onchange = () => {
+  if (el("file").files.length) datasetSelect.value = "";
+  showCoverage();
+};
+
+request("/v1/datasets").then(({datasets}) => {
+  for (const dataset of datasets) {
+    if (!catalog.has(dataset.id)) rememberDataset(dataset);
+  }
+}).catch(err => {
+  el("dataset-note").textContent = "Could not load saved datasets. " + err.message;
+});
+
 async function setup() {
   const schema = await request("/v1/run-options");
   const strategy = form.elements.strategy;
@@ -131,8 +174,8 @@ form.onsubmit = async event => {
   event.preventDefault();
   const file = el("file").files[0];
   el("error").textContent = "";
-  if (!file || file.size === 0 || file.size > 8 * 1024 * 1024) {
-    el("error").textContent = "Choose a non-empty CSV up to 8 MiB.";
+  if (!datasetSelect.value && (!file || file.size === 0 || file.size > 8 * 1024 * 1024)) {
+    el("error").textContent = "Select a saved dataset or choose a non-empty CSV or Parquet file up to 8 MiB.";
     return;
   }
   const options = {strategy: form.elements.strategy.value, limit_includes_fees: form.elements.limit_includes_fees.checked};
@@ -141,8 +184,24 @@ form.onsubmit = async event => {
   }
   el("start").disabled = true;
   try {
-    const dataset = await request("/v1/datasets", {method:"POST", headers:{"Content-Type":"text/csv"}, body:file});
-    const run = await request("/v1/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({dataset:dataset.id, options})});
+    let datasetId = datasetSelect.value;
+    if (!datasetId) {
+      const contentType = /\.parquet$/i.test(file.name) ? "application/vnd.apache.parquet" : "text/csv";
+      const query = new URLSearchParams();
+      const symbol = el("symbol").value.trim();
+      const quote = el("quote-currency").value.trim();
+      if (symbol) query.set("symbol", symbol);
+      if (quote) query.set("quote_currency", quote);
+      const dataset = await request("/v1/datasets?" + query, {method:"POST", headers:{"Content-Type":contentType}, body:file});
+      datasetId = dataset.id;
+      rememberDataset(dataset);
+      datasetSelect.value = datasetId;
+      el("file").value = "";
+      showCoverage();
+      el("symbol").value = "";
+      el("quote-currency").value = "";
+    }
+    const run = await request("/v1/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({dataset:datasetId, options})});
     comparison.reset();
     active = run.id;
     el("cancel-error").textContent = "";

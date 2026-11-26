@@ -14,7 +14,30 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     Ok(())
 }
 
+#[derive(Default, serde::Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatasetMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote_currency: Option<String>,
+}
+
+impl DatasetMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.symbol.is_none() && self.quote_currency.is_none()
+    }
+}
+
 pub fn summary(path: &Path, results: &[BacktestResult]) -> Result<()> {
+    summary_with_metadata(path, results, &DatasetMetadata::default())
+}
+
+pub fn summary_with_metadata(
+    path: &Path,
+    results: &[BacktestResult],
+    metadata: &DatasetMetadata,
+) -> Result<()> {
     let dca = results.iter().find(|r| r.strategy_name == "DCA");
     let portfolios: Vec<_> = results
         .iter()
@@ -35,7 +58,14 @@ pub fn summary(path: &Path, results: &[BacktestResult]) -> Result<()> {
             })
         })
         .collect();
-    write_json(path, &json!({"version": 1, "portfolios": portfolios}))
+    let mut report = json!({"version": 1, "portfolios": portfolios});
+    if let Some(symbol) = &metadata.symbol {
+        report["symbol"] = json!(symbol);
+    }
+    if let Some(quote_currency) = &metadata.quote_currency {
+        report["quote_currency"] = json!(quote_currency);
+    }
+    write_json(path, &report)
 }
 
 pub fn equity(path: &Path, series: &PriceSeries, results: &[BacktestResult]) -> Result<()> {

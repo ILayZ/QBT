@@ -1,5 +1,6 @@
 """Exercise the local workspace against the running API and worker in CI."""
 import csv
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -40,6 +41,7 @@ with sync_playwright() as playwright:
     expect(dip.get_by_role("cell", name="-12.82", exact=True)).to_be_visible()
     expect(dip.get_by_role("cell", name="879.08", exact=True)).to_be_visible()
     expect(dip.get_by_role("cell", name="386 h", exact=True)).to_be_visible()
+    expect(comparison).to_contain_text("Monetary values in USD.")
     expect(portfolios.locator('[aria-sort="descending"]')).to_contain_text("Final equity")
     portfolios.get_by_role("button", name="Sort by Portfolio", exact=True).click()
     expect(portfolios.locator('[aria-sort="ascending"]')).to_contain_text("Portfolio")
@@ -75,10 +77,10 @@ with sync_playwright() as playwright:
     page.get_by_label("Market data").set_input_files(
         {"name": "broken.csv", "mimeType": "text/csv", "buffer": b"bad\n1\n"})
     page.get_by_role("button", name="Start backtest").click()
-    expect(page.get_by_role("status")).to_have_text("failed", timeout=90000)
-    expect(page.locator("#diagnostic")).not_to_be_empty()
-    expect(ledger).to_have_count(0)
-    expect(comparison).to_be_hidden()
+    expect(page.locator("#error")).to_contain_text("Missing timestamp")
+    expect(page.get_by_role("status")).to_have_text("succeeded")
+    expect(ledger).to_be_visible()
+    assert page.url == successful_url
     page.goto("http://127.0.0.1:8765")
     history = page.get_by_role("region", name="Run history")
     older = history.locator(f'a[href="?{successful_url.split("?", 1)[1]}"]')
@@ -87,6 +89,13 @@ with sync_playwright() as playwright:
     assert page.url == successful_url
     expect(comparison.get_by_role("table", name="Portfolio results")).to_be_visible()
 
+    legacy_id = hashlib.sha256(b"old,bad,dataset\n1,2,3\n").hexdigest()
+    page.get_by_label("Saved dataset").select_option(legacy_id)
+    page.get_by_role("button", name="Start backtest").click()
+    expect(page.get_by_role("status")).to_have_text("failed", timeout=90000)
+    expect(page.locator("#diagnostic")).not_to_be_empty()
+    expect(ledger).to_have_count(0)
+    expect(comparison).to_be_hidden()
     newest = page.request.get("http://127.0.0.1:8765/v1/runs?limit=1").json()
     second = page.request.get(f"http://127.0.0.1:8765/v1/runs?limit=1&before={newest['next']}").json()
     assert newest["runs"][0]["state"] == "failed"
@@ -106,7 +115,12 @@ with sync_playwright() as playwright:
     expect(ledger).to_be_visible()
     page.unroute(status_url, legacy_run)
 
-    page.get_by_label("Market data").set_input_files("data/sample_btc_1h.csv")
+    dataset = page.get_by_label("Saved dataset")
+    option = dataset.locator("option").filter(has_text="PARQUET")
+    expect(option).to_have_count(1)
+    dataset.select_option(option.get_attribute("value"))
+    expect(page.locator("#dataset-note")).to_contain_text("2 hourly bars")
+    page.route("**/v1/datasets?*", lambda route: route.abort())
     page.get_by_label("Strategy", exact=True).select_option("DipDCA")
     page.get_by_role("button", name="Start backtest").click()
     expect(page.get_by_role("status")).to_have_text("succeeded", timeout=90000)
