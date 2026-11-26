@@ -1,9 +1,12 @@
 import hashlib
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -44,6 +47,20 @@ async def lifespan(app):
 
 
 app = FastAPI(title="QBT local platform", lifespan=lifespan)
+
+
+WEB = Path(__file__).resolve().parents[1] / "web"
+app.mount("/ui", StaticFiles(directory=WEB), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+def workspace():
+    return FileResponse(WEB / "index.html")
+
+
+@app.get("/v1/run-options")
+def run_options():
+    return Options.model_json_schema()
 
 
 def store_dataset(content):

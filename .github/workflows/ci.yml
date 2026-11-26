@@ -123,13 +123,14 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:qbt@127.0.0.1:5432/qbt
         run: |
-          python -m pip install -r apps/platform/requirements.txt
+          python -m pip install -r apps/platform/requirements.txt playwright
           python -m uvicorn api:app --app-dir apps/platform --host 127.0.0.1 --port 8765 &
           api_pid=$!
           python apps/platform/worker.py &
           worker_pid=$!
           trap 'kill "$api_pid" "$worker_pid" 2>/dev/null || true' EXIT
           python apps/platform/test_http.py
+          python apps/platform/test_browser.py
 
       - name: Save sample comparison report and order journal
         uses: actions/upload-artifact@v4

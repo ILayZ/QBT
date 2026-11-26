@@ -12,6 +12,8 @@ python apps/platform/worker.py &
 python -m uvicorn api:app --app-dir apps/platform --host 127.0.0.1 --port 8765
 ```
 
+Open http://127.0.0.1:8765 in a browser to upload a CSV, choose a strategy or compare all five, and download results. Bookmark the URL after submission to return to the run. The form loads strategy names and defaults from the API.
+
 In a second shell, upload the sample and submit a comparison. These examples use jq.
 
 ```bash
