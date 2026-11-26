@@ -1,4 +1,6 @@
 import hashlib
+import json
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
@@ -8,30 +10,73 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 from starlette.concurrency import run_in_threadpool
 
-from shared import ARTIFACTS, build_id, connect, initialize
+from shared import ARTIFACTS, BINARY, build_id, connect, initialize
 
 MAX_BYTES = 8 * 1024 * 1024
 LOCAL_RUN_SCOPE = "local"
 
 
-class Options(BaseModel):
+def load_strategy_catalog():
+    build = build_id()
+    result = subprocess.run([str(BINARY), "strategies", "--json"], check=True, capture_output=True, timeout=10)
+    catalog = json.loads(result.stdout)
+    if catalog["version"] != 1 or build != build_id():
+        raise RuntimeError("QBT binary changed or provided an unsupported strategy catalog")
+    return build, catalog
+
+
+BUILD, STRATEGY_CATALOG = load_strategy_catalog()
+COMPARISON_ID = STRATEGY_CATALOG["comparison_id"]
+STRATEGY_IDS = tuple(strategy["id"] for strategy in STRATEGY_CATALOG["strategies"]) + (COMPARISON_ID,)
+STRATEGY_ALIASES = {
+    name.lower(): strategy["id"]
+    for strategy in STRATEGY_CATALOG["strategies"]
+    for name in (strategy["id"], *strategy["aliases"])
+}
+STRATEGY_ALIASES[COMPARISON_ID.lower()] = COMPARISON_ID
+
+
+class ExecutionOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    strategy: Literal["DCA", "DipDCA", "MomentumSMA", "VolAdjustedDCA", "RegimeSwitch", "all"] = "DCA"
     capital: float = Field(default=10000, gt=0)
-    dca_interval: int = Field(default=24, gt=0, le=2**32 - 1)
-    dca_amount: float = Field(default=100, gt=0)
-    order_amount: float | None = Field(default=None, gt=0)
     daily_limit: float | None = Field(default=None, gt=0)
     min_notional: float | None = Field(default=None, gt=0)
     limit_includes_fees: bool = False
-    dip_lookback: int = Field(default=168, ge=2)
-    dip_percent: float = Field(default=5, gt=0, lt=100)
     fee: float = Field(default=0.001, ge=0, lt=1)
     slippage: float = Field(default=0.0005, ge=0, lt=1)
     risk_free: float = 0.03
+
+
+    @field_validator("strategy", mode="before", check_fields=False)
+    @classmethod
+    def canonical_strategy(cls, value):
+        if isinstance(value, str) and value.isascii():
+            return STRATEGY_ALIASES.get(value.lower(), value)
+        return value
+
+
+def parameter_field(parameter):
+    value_type = int if parameter["type"] == "integer" else float
+    default = parameter["default"]
+    return (value_type | None if default is None else value_type), Field(
+        default=default,
+        description=parameter["description"],
+        ge=parameter.get("minimum"),
+        le=parameter.get("maximum"),
+        gt=parameter.get("exclusive_minimum"),
+        lt=parameter.get("exclusive_maximum"),
+    )
+
+
+Options = create_model(
+    "Options",
+    __base__=ExecutionOptions,
+    strategy=(Literal[STRATEGY_IDS], STRATEGY_CATALOG["default_strategy"]),
+    **{parameter["id"]: parameter_field(parameter) for parameter in STRATEGY_CATALOG["parameters"]},
+)
 
 
 class Submission(BaseModel):
@@ -43,7 +88,7 @@ class Submission(BaseModel):
 @asynccontextmanager
 async def lifespan(app):
     initialize()
-    app.state.build = build_id()
+    app.state.build = BUILD
     yield
 
 
@@ -61,7 +106,7 @@ def workspace():
 
 @app.get("/v1/run-options")
 def run_options():
-    return Options.model_json_schema()
+    return {**Options.model_json_schema(), "strategy_catalog": STRATEGY_CATALOG}
 
 
 def store_dataset(content):

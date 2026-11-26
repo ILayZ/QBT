@@ -12,7 +12,7 @@ python apps/platform/worker.py &
 python -m uvicorn api:app --app-dir apps/platform --host 127.0.0.1 --port 8765
 ```
 
-Open http://127.0.0.1:8765 in a browser to upload a CSV, choose a strategy or compare all five, and download results. Open a previous result from Run history or bookmark its URL. History includes runs submitted directly through the API. Use `GET /v1/runs?limit=20` to list recent runs and pass the returned `next` ID as `before` for the following page. The form loads strategy names and defaults from the API.
+Open http://127.0.0.1:8765 in a browser to upload a CSV, choose a strategy or compare all five, and download results. Open a previous result from Run history or bookmark its URL. History includes runs submitted directly through the API. Use `GET /v1/runs?limit=20` to list recent runs and pass the returned `next` ID as `before` for the following page. The form loads the running build’s strategy catalog from `GET /v1/run-options` and shows the fields for the selected strategy. Comparison shows all available strategy fields. The endpoint includes the existing JSON Schema and a `strategy_catalog` entry identical to `qbt strategies --json`. Strategy IDs and aliases are case-insensitive. Fixed algorithm settings are listed in `fixed_parameters`.
 
 In a second shell, upload the sample and submit a comparison. These examples use jq.
 
