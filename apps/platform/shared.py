@@ -45,6 +45,11 @@ def initialize():
                 expires_at timestamptz,
                 error text
             );
+            ALTER TABLE qbt_runs
+                ADD COLUMN IF NOT EXISTS idempotency_scope text,
+                ADD COLUMN IF NOT EXISTS idempotency_key text;
+            CREATE UNIQUE INDEX IF NOT EXISTS qbt_runs_idempotency
+                ON qbt_runs (idempotency_scope, idempotency_key);
             CREATE INDEX IF NOT EXISTS qbt_runs_history ON qbt_runs (created_at DESC, id DESC);
             CREATE TABLE IF NOT EXISTS qbt_artifacts (
                 run_id uuid NOT NULL REFERENCES qbt_runs(id),

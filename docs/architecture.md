@@ -43,7 +43,7 @@ An order observes a close and can fill at the next open. Keep signal time, execu
 | POST /v1/runs/{id}/cancel | Cancel a queued job or request cancellation of a running attempt |
 | GET /v1/runs/{id}/artifacts | Return an authorized manifest and download links |
 
-Bind idempotency keys to project and request hash. Repeating a submission returns the original run. Reusing a key with different input returns a conflict. Claim queued rows with a short transaction using SKIP LOCKED, an attempt token and an expiring lease. Execute outside the transaction. Heartbeat the lease and check cancellation at bounded intervals. Retry transient errors up to a configured attempt limit. Validation errors are terminal.
+The local API binds optional idempotency keys to a single local scope and compares the dataset ID and validated options stored on the run. Repeating a submission returns the original run. Reusing a key with different input returns a conflict. A multi-project API should derive the scope from the authenticated project. Claim queued rows with a short transaction using SKIP LOCKED, an attempt token and an expiring lease. Execute outside the transaction. Heartbeat the lease and check cancellation at bounded intervals. Retry transient errors up to a configured attempt limit. Validation errors are terminal.
 
 Upload artifacts under attempt-specific keys. In one transaction verify the active token and cancellation state, attach the manifest and mark the run succeeded. An expired worker cannot overwrite a newer result. Clean up unreferenced objects after a grace period. Apply project-level CPU concurrency and upload limits. Record queue delay, simulation duration and failure reason by engine build.
 

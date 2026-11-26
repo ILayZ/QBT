@@ -1,6 +1,6 @@
 # Local strategy testing service
 
-Run the single-user API and worker from the repository root with Python 3.11+, PostgreSQL 16 and the release CLI. Use a dedicated empty database. Both processes initialize the schema on startup. Keep the API bound to loopback.
+Run the single-user API and worker from the repository root with Python 3.11+, PostgreSQL 16 and the release CLI. Use a dedicated database. Both processes initialize or upgrade the schema on startup, preserving existing runs. Keep the API bound to loopback.
 
 ```bash
 cargo build --release --locked
@@ -28,6 +28,8 @@ curl -fsS "$base/v1/runs/$run/artifacts/manifest.json" -o manifest.json
 ```
 
 Interactive endpoint documentation is at `/docs`. Upload accepts raw CSV up to 8 MiB. Identical bytes share one dataset ID. Upload records the bytes, and the engine validates the bars during a run. A failed simulation exposes its error through the status endpoint.
+
+To retry a submission safely, send an optional `Idempotency-Key` header with `POST /v1/runs`. Use one case-sensitive key of 1 to 128 visible ASCII characters without commas, such as a UUID. The key applies across the local service. A retry with the same dataset ID and validated options, including defaults, returns HTTP 202 with the original run ID and its current state, even after completion. Reusing a key with a different dataset or options returns HTTP 409. Each request without the header creates a new run. Keys are retained with their runs.
 
 This first deployment stores inputs, job state and artifacts together in PostgreSQL. Workers claim jobs for their binary's SHA-256. Keep the binary immutable while either process runs and restart both when upgrading. An expired six-minute lease allows another worker of the same build to recover a job. A five-minute subprocess timeout bounds execution. The attempt token fences publication, and all artifacts become visible in one transaction. The API supports single and comparison runs. Project authentication, walk-forward submission and external object storage are planned.
 
