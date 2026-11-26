@@ -12,7 +12,8 @@
 <h2>New run</h2>
 <label>Market data <input type="file" id="file" accept=".csv,text/csv" required aria-describedby="file-note"></label>
 <small id="file-note">Hourly OHLCV · CSV up to 8 MiB</small>
-<label>Strategy <select name="strategy" required><option value="">Loading…</option></select></label>
+<label for="strategy">Strategy</label>
+<select id="strategy" name="strategy" required><option value="">Loading…</option></select>
 <div class="fields">
 <label>Initial capital <input name="capital" type="number" step="any" min="0" required></label>
 <label>Order amount <input name="order_amount" type="number" step="any" min="0" placeholder="Strategy default"></label>
