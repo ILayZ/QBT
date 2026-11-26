@@ -174,5 +174,20 @@ else
   bad "independent DipDCA reserve and fills"
 fi
 
+# Replay a resolved comparison and reject altered inputs before opening outputs.
+mkdir -p "$OUT_DIR/replay"
+manifest=$(mktemp -d "$OUT_DIR/replay/run.XXXXXX")/manifest.json
+if "$BIN" run --input "$DATA" --strategy all --capital 1800 --order-amount 10 \
+    --daily-limit 10 --min-notional 1 --save-manifest "$manifest" --output "$OUT_DIR/replay/run.html" &&
+    "$BIN" replay --input "$DATA" --manifest "$manifest" --ledger "$OUT_DIR/replay/orders.csv" \
+        --output "$OUT_DIR/replay/replay.html" &&
+    cmp "$OUT_DIR/min.csv" "$OUT_DIR/replay/orders.csv" &&
+    cmp "$OUT_DIR/replay/run.html" "$OUT_DIR/replay/replay.html" &&
+    ! "$BIN" replay --input "$OUT_DIR/reference.csv" --manifest "$manifest" --output "$OUT_DIR/replay/invalid.html"; then
+  ok "manifest replay and dataset mismatch detection"
+else
+  bad "manifest replay and dataset mismatch detection"
+fi
+
 echo "== RESULT: $pass passed, $fail failed =="
 [[ "$fail" -eq 0 ]] && exit 0 || exit 1

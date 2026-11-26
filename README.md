@@ -126,6 +126,17 @@ Buy and hold invests the initial balance at the first executable open, with the
 same fee, slippage and order minimum; the daily allocation limit applies only
 to the five strategies.
 
+### Save and replay a run
+
+```bash
+qbt run --input data/sample_btc_1h.csv --strategy all --capital 1800 \\
+  --order-amount 10 --daily-limit 10 --save-manifest experiment.json
+qbt replay --manifest experiment.json --input data/sample_btc_1h.csv \\
+  --ledger replay.csv --output replay.html
+```
+
+Choose a new manifest filename for each saved run. The manifest stores resolved simulation parameters and XXH3-128 fingerprints of the parsed UTC bars and CLI executable. Preserve the binary and the dataset with the manifest. Replay checks both fingerprints before opening its outputs. CSV files may be relocated or reformatted if they parse to identical bars. This format covers `run`, including comparisons.
+
 ### DipDCA
 
 ```bash

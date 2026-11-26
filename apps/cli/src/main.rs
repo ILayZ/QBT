@@ -1,4 +1,5 @@
 mod cli;
+mod manifest;
 
 use anyhow::Result;
 use cli::{Cli, Command};
@@ -12,6 +13,7 @@ fn main() -> Result<()> {
     let cli: Cli = argh::from_env();
 
     match &cli.command {
+        Command::Replay(args) => args.execute(),
         Command::Run(args) => args.execute(),
         Command::WalkForward(args) => args.execute(),
         Command::Report(args) => args.execute(),
