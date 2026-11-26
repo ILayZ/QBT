@@ -8,6 +8,12 @@ use std::fmt;
 pub enum Strategy {
     /// Dollar-cost averaging at fixed intervals
     DCA { interval_hours: u32, amount: f64 },
+    /// Buy from a cash reserve on a drawdown from the trailing closing high.
+    DipDCA {
+        daily_allocation: f64,
+        lookback_hours: usize,
+        drop_fraction: f64,
+    },
     /// Momentum-based (buy when price > SMA, sell when price < SMA)
     MomentumSMA {
         lookback: u32,
@@ -54,6 +60,7 @@ impl fmt::Display for Regime {
 /// Strategy signal (buy/sell/hold)
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Signal {
+    BuyReserve,
     Buy { amount: f64 },
     Sell { amount: f64 },
     Hold,
@@ -131,6 +138,7 @@ impl Strategy {
     pub fn name(&self) -> &str {
         match self {
             Strategy::DCA { .. } => "DCA",
+            Strategy::DipDCA { .. } => "DipDCA",
             Strategy::MomentumSMA { .. } => "MomentumSMA",
             Strategy::VolAdjustedDCA { .. } => "VolAdjustedDCA",
             Strategy::RegimeSwitch { .. } => "RegimeSwitch",
@@ -141,6 +149,30 @@ impl Strategy {
     pub fn generate_signals(&self, series: &PriceSeries) -> Vec<Signal> {
         let closes = series.closes();
         match self {
+            Strategy::DipDCA {
+                lookback_hours,
+                drop_fraction,
+                ..
+            } => {
+                let mut signals = vec![Signal::Hold; closes.len()];
+                // Keep candidate peak indices in descending price order.
+                let mut peaks = std::collections::VecDeque::<usize>::new();
+                for (i, &close) in closes.iter().enumerate() {
+                    let start = (i + 1).saturating_sub(*lookback_hours);
+                    while peaks.front().is_some_and(|&j| j < start) {
+                        peaks.pop_front();
+                    }
+                    while peaks.back().is_some_and(|&j| closes[j] <= close) {
+                        peaks.pop_back();
+                    }
+                    peaks.push_back(i);
+                    if i + 1 >= *lookback_hours && close <= closes[peaks[0]] * (1.0 - drop_fraction)
+                    {
+                        signals[i] = Signal::BuyReserve;
+                    }
+                }
+                signals
+            }
             Strategy::DCA {
                 interval_hours,
                 amount,

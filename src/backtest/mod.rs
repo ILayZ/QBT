@@ -23,6 +23,10 @@ pub struct BacktestResult {
     #[serde(default)]
     pub mean_asset_weight: Option<f64>,
     #[serde(default)]
+    pub dip_reserve: Option<f64>,
+    #[serde(default)]
+    pub max_reserve_wait_hours: usize,
+    #[serde(default)]
     pub skipped_buys: usize,
     #[serde(default)]
     pub below_minimum_buys: usize,
@@ -191,6 +195,29 @@ impl Backtester {
         );
 
         series.validate_hourly()?;
+        let allocation = if let Strategy::DipDCA {
+            daily_allocation,
+            lookback_hours,
+            drop_fraction,
+        } = strategy
+        {
+            anyhow::ensure!(
+                daily_allocation.is_finite() && *daily_allocation > 0.0,
+                "Daily allocation must be finite and positive"
+            );
+            anyhow::ensure!(
+                *lookback_hours >= 2 && *drop_fraction > 0.0 && *drop_fraction < 1.0,
+                "DipDCA requires at least two closes and a drop between 0 and 100 percent"
+            );
+            Some(*daily_allocation)
+        } else {
+            None
+        };
+        let mut reserve = allocation
+            .unwrap_or_default()
+            .min(self.config.initial_capital);
+        let mut waiting = 0;
+        let mut max_waiting = 0;
         let signals = strategy.generate_signals(series);
         let single_position = matches!(
             strategy,
@@ -214,6 +241,7 @@ impl Backtester {
             if bar.timestamp.date_naive() != day {
                 day = bar.timestamp.date_naive();
                 spent = 0.0;
+                reserve = (reserve + allocation.unwrap_or_default()).min(cash);
             }
             let exec_price = bar.open;
             let exec_ts = bar.timestamp;
@@ -227,13 +255,16 @@ impl Backtester {
                 fee,
                 cash,
             };
+            let mut dip_filled = false;
             match signal {
-                Signal::Buy { amount } if !single_position || lots.is_empty() => {
+                Signal::Buy { .. } | Signal::BuyReserve if !single_position || lots.is_empty() => {
                     let buy_price = exec_price * (1.0 + self.config.slippage);
-                    let requested = if single_position {
-                        budget.entry_amount.unwrap_or(*amount)
-                    } else {
-                        *amount
+                    let requested = match signal {
+                        Signal::Buy { amount } if single_position => {
+                            budget.entry_amount.unwrap_or(*amount)
+                        }
+                        Signal::Buy { amount } => *amount,
+                        _ => reserve / (1.0 + self.config.trading_fee),
                     };
                     let fee_factor = if budget.include_fees {
                         1.0 + self.config.trading_fee
@@ -250,7 +281,15 @@ impl Backtester {
                         amount + fee
                     };
 
-                    if amount <= 0.0 {
+                    let total_cost = if allocation.is_some() {
+                        total_cost.min(reserve)
+                    } else {
+                        total_cost
+                    };
+                    if allocation.is_some() && reserve == 0.0 {
+                        skipped_buys += 1;
+                        record(event("buy", "empty_reserve", buy_price, 0.0, 0.0, cash))?;
+                    } else if amount <= 0.0 {
                         skipped_buys += 1;
                         record(event("buy", "daily_limit", buy_price, 0.0, 0.0, cash))?;
                     } else if amount < minimum {
@@ -269,6 +308,14 @@ impl Backtester {
                         record(event("buy", "insufficient_cash", buy_price, 0.0, 0.0, cash))?;
                     } else {
                         cash -= total_cost;
+                        if allocation.is_some() {
+                            reserve = if amount == requested {
+                                0.0
+                            } else {
+                                reserve - total_cost
+                            };
+                            dip_filled = true;
+                        }
                         spent = if requested >= remaining / fee_factor {
                             budget.daily_limit.unwrap_or(f64::INFINITY)
                         } else {
@@ -354,13 +401,19 @@ impl Backtester {
                         record(event("sell", "no_position", exec_price, 0.0, 0.0, cash))?;
                     }
                 }
-                Signal::Buy { .. } => {
+                Signal::Buy { .. } | Signal::BuyReserve => {
                     skipped_buys += 1;
                     record(event("buy", "position_open", exec_price, 0.0, 0.0, cash))?;
                 }
                 Signal::Hold => {}
             }
 
+            if reserve > 0.0 && !dip_filled {
+                waiting += 1;
+                max_waiting = max_waiting.max(waiting);
+            } else {
+                waiting = 0;
+            }
             let position_qty: f64 = lots.iter().map(|l| l.quantity).sum();
             let asset_value = position_qty * bar.close;
             let value = cash + asset_value;
@@ -369,6 +422,8 @@ impl Backtester {
         }
 
         let mut metrics = calculate_metrics(&equity, &trades, self.config.risk_free_rate);
+        metrics.dip_reserve = allocation.map(|_| reserve);
+        metrics.max_reserve_wait_hours = max_waiting;
         metrics.mean_asset_weight = Some(weight_sum / equity.len() as f64);
         metrics.skipped_buys = skipped_buys;
         metrics.below_minimum_buys = below_minimum_buys;
@@ -494,6 +549,8 @@ fn calculate_metrics(equity: &[f64], trades: &[Trade], risk_free_rate: f64) -> B
         initial_capital: equity[0],
         final_value: *equity.last().unwrap(),
         mean_asset_weight: None,
+        dip_reserve: None,
+        max_reserve_wait_hours: 0,
         skipped_buys: 0,
         below_minimum_buys: 0,
         total_return: metrics.total_return,
@@ -689,6 +746,45 @@ mod tests {
         assert_eq!(events[1], ("sell", "below_min_notional", 900.0));
         assert!(result.trade_log.is_empty());
         assert_eq!(result.final_value, 970.0);
+    }
+
+    #[test]
+    fn dip_reserve_carries_over_and_fills_at_the_next_open() {
+        let mut prices = vec![100.0; 51];
+        prices[23..].fill(90.0);
+        prices[47] = 120.0;
+        let series = make_series(prices);
+        let bt = Backtester::new(BacktestConfig {
+            initial_capital: 100.0,
+            trading_fee: 0.0,
+            slippage: 0.0,
+            risk_free_rate: 0.0,
+        });
+        let strategy = Strategy::DipDCA {
+            daily_allocation: 10.0,
+            lookback_hours: 24,
+            drop_fraction: 0.1,
+        };
+        let budget = BuyBudget {
+            min_notional: Some(25.0),
+            ..BuyBudget::default()
+        };
+        let mut fills = Vec::new();
+        let result = bt
+            .run_with_budget(&series, &strategy, &budget, |event| {
+                if event.status == "filled" {
+                    fills.push((event.signal_time, event.execution_time, event.cash));
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            fills,
+            vec![(series.bars[48].timestamp, series.bars[49].timestamp, 70.0)]
+        );
+        assert!(result.below_minimum_buys > 0);
+        assert_eq!(result.dip_reserve, Some(0.0));
+        assert_eq!(result.final_value, 100.0);
     }
 
     #[test]

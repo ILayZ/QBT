@@ -102,7 +102,7 @@ html = Path(sys.argv[1]).read_text()
 with open(sys.argv[2]) as stream:
     orders = list(csv.DictReader(stream))
 assert "<svg" in html
-for name in ("DCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch", "Cash", "Buy and hold"):
+for name in ("DCA", "DipDCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch", "Cash", "Buy and hold"):
     match = re.search(r"<tr><td>" + name + r"</td>(.*?)</tr>", html)
     values = re.findall(r"<td>([^<]*)</td>", match[1])
     print(name, *values)
@@ -124,6 +124,44 @@ then
   ok "minimum order value and comparison baselines"
 else
   bad "minimum order value and comparison baselines"
+fi
+
+if "$BIN" run --input "$DATA" --strategy DipDCA --capital 1800 --order-amount 10 \
+    --min-notional 1 --ledger "$OUT_DIR/dip.csv" --output "$OUT_DIR/dip.html" &&
+    python3 - "$DATA" "$OUT_DIR/dip.csv" "$OUT_DIR/dip.html" <<'PYTHON'
+import csv, math, sys
+from pathlib import Path
+
+with open(sys.argv[1]) as f:
+    bars = list(csv.DictReader(f))
+with open(sys.argv[2]) as f:
+    actual = [r for r in csv.DictReader(f) if r["status"] == "filled"]
+cash, reserve, qty = 1800.0, 10.0, 0.0
+expected = []
+closes = [float(b["close"]) for b in bars]
+for i, bar in enumerate(bars[1:]):
+    if bar["timestamp"][:10] != bars[i]["timestamp"][:10]:
+        reserve = min(cash, reserve + 10)
+    if i < 167 or closes[i] > max(closes[i-167:i+1]) * 0.95 or reserve / 1.001 < 1:
+        continue
+    units = reserve / 1.001 / (float(bar["open"]) * 1.0005)
+    qty += units
+    cash -= reserve
+    reserve = 0.0
+    expected.append((bar["timestamp"][:19], units, cash))
+assert len(expected) == len(actual) > 0
+for (when, units, balance), row in zip(expected, actual):
+    assert row["execution_time"][:19] == when
+    assert math.isclose(float(row["quantity"]), units)
+    assert abs(float(row["cash"]) - balance) < 1e-8
+final = cash + qty * closes[-1]
+assert f"Final Value</b></td><td>${final:.2f}</td>" in Path(sys.argv[3]).read_text()
+print(f"DipDCA uncapped: buys={len(actual)} reserve={reserve:.2f} cash={cash:.2f} final={final:.2f}")
+PYTHON
+then
+  ok "independent DipDCA reserve and fills"
+else
+  bad "independent DipDCA reserve and fills"
 fi
 
 echo "== RESULT: $pass passed, $fail failed =="

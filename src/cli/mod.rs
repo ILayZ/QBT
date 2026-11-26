@@ -33,6 +33,12 @@ pub struct RunArgs {
     /// output report path
     #[argh(option, default = r#"std::path::PathBuf::from("report.html")"#)]
     pub output: PathBuf,
+    /// trailing hourly closes used by DipDCA
+    #[argh(option, default = "168")]
+    pub dip_lookback: usize,
+    /// percent below trailing high required by DipDCA
+    #[argh(option, default = "5.0")]
+    pub dip_percent: f64,
     /// strategy name
     #[argh(option, default = r#""DCA".to_string()"#)]
     pub strategy: String,
@@ -78,6 +84,12 @@ pub struct WalkForwardArgs {
     /// input CSV file
     #[argh(option)]
     pub input: PathBuf,
+    /// trailing hourly closes used by DipDCA
+    #[argh(option, default = "168")]
+    pub dip_lookback: usize,
+    /// percent below trailing high required by DipDCA
+    #[argh(option, default = "5.0")]
+    pub dip_percent: f64,
     /// strategy name
     #[argh(option, default = r#""MomentumSMA".to_string()"#)]
     pub strategy: String,
@@ -124,9 +136,16 @@ fn builtin_strategy(
     interval: u32,
     amount: f64,
     vol_base: f64,
+    dip_lookback: usize,
+    dip_percent: f64,
 ) -> Result<crate::strategy::Strategy> {
     use crate::strategy::{Regime, Strategy};
     Ok(match name.to_ascii_uppercase().as_str() {
+        "DIPDCA" => Strategy::DipDCA {
+            daily_allocation: amount,
+            lookback_hours: dip_lookback,
+            drop_fraction: dip_percent / 100.0,
+        },
         "DCA" => Strategy::DCA {
             interval_hours: interval,
             amount,
@@ -176,7 +195,13 @@ impl RunArgs {
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
 
         let names = if self.strategy.eq_ignore_ascii_case("all") {
-            vec!["DCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch"]
+            vec![
+                "DCA",
+                "DipDCA",
+                "VolAdjustedDCA",
+                "MomentumSMA",
+                "RegimeSwitch",
+            ]
         } else {
             vec![self.strategy.as_str()]
         };
@@ -188,7 +213,16 @@ impl RunArgs {
         let vol_base = self.order_amount.map_or(self.dca_amount, |v| v / 24.0);
         let strategies = names
             .iter()
-            .map(|name| builtin_strategy(name, self.dca_interval, amount, vol_base))
+            .map(|name| {
+                builtin_strategy(
+                    name,
+                    self.dca_interval,
+                    amount,
+                    vol_base,
+                    self.dip_lookback,
+                    self.dip_percent,
+                )
+            })
             .collect::<Result<Vec<_>>>()?;
         let budget = BuyBudget {
             daily_limit: self.daily_limit,
@@ -295,7 +329,14 @@ impl WalkForwardArgs {
             anyhow::bail!("Step months must be positive, got 0");
         }
 
-        let strategy = builtin_strategy(&self.strategy, 24, 100.0, 100.0)?;
+        let strategy = builtin_strategy(
+            &self.strategy,
+            24,
+            100.0,
+            100.0,
+            self.dip_lookback,
+            self.dip_percent,
+        )?;
         let strategy_factory = move |_, _| strategy.clone();
 
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
@@ -339,6 +380,7 @@ impl StrategiesArgs {
     pub fn execute(&self) -> Result<()> {
         let strategies = vec![
             ("DCA", "Dollar-cost averaging at fixed intervals"),
+            ("DipDCA", "Accumulate daily cash and buy on a drawdown"),
             ("MomentumSMA", "Buy when price > SMA, sell when price < SMA"),
             (
                 "VolAdjustedDCA",
@@ -358,6 +400,9 @@ impl StrategiesArgs {
             println!("• {} - {}", name, desc);
             if self.verbose {
                 match name {
+                    "DipDCA" => {
+                        println!("    Parameters: daily allocation, dip-lookback, dip-percent")
+                    }
                     "DCA" => println!("    Parameters: interval_hours, amount"),
                     "MomentumSMA" => {
                         println!("    Parameters: lookback, buy_threshold, sell_threshold")

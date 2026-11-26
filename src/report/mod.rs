@@ -26,7 +26,7 @@ impl HtmlReport {
         let mut sections = Vec::new();
 
         for r in results {
-            let table_rows: Vec<String> = [
+            let mut table_rows: Vec<String> = [
                 ("Strategy", r.strategy_name.as_str()),
                 ("Initial Capital", &format!("${:.2}", r.initial_capital)),
                 ("Final Value", &format!("${:.2}", r.final_value)),
@@ -44,6 +44,15 @@ impl HtmlReport {
             .map(|(k, v)| format!("<tr><td><b>{}</b></td><td>{}</td></tr>", k, v))
             .collect();
 
+            if let Some(reserve) = r.dip_reserve {
+                table_rows.push(format!(
+                    "<tr><td>Unspent reserve</td><td>${reserve:.2}</td></tr>"
+                ));
+                table_rows.push(format!(
+                    "<tr><td>Longest funded wait</td><td>{} hours</td></tr>",
+                    r.max_reserve_wait_hours
+                ));
+            }
             sections.push(format!(
                 "<div class=\"report-section\"><h2>{}</h2><table>{}</table></div>",
                 r.strategy_name,
@@ -155,6 +164,8 @@ mod tests {
         let results = vec![BacktestResult {
             strategy_name: "Test Strategy".into(),
             mean_asset_weight: None,
+            dip_reserve: None,
+            max_reserve_wait_hours: 0,
             skipped_buys: 0,
             below_minimum_buys: 0,
             initial_capital: 10000.0,

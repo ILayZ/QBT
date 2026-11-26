@@ -1,4 +1,4 @@
-"""Reconcile the four-strategy sample run against its journal and printed report."""
+"""Reconcile the multi-strategy sample run against its journal and printed report."""
 
 import csv
 import math
@@ -16,7 +16,7 @@ def check(data, journal, report, include_fees):
         for row in csv.DictReader(stream):
             orders[row["strategy"]].append(row)
     html = Path(report).read_text()
-    assert orders.keys() == {"DCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch"}
+    assert orders.keys() == {"DCA", "DipDCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch"}
     for name, rows in orders.items():
         cash, units, fees, buys = 1800.0, 0.0, 0.0, 0
         daily = defaultdict(float)
