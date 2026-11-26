@@ -16,6 +16,7 @@ from uuid import uuid4
 from shared import connect
 
 BASE = "http://127.0.0.1:8765"
+BINARY = os.environ.get("QBT_BINARY", "target/release/qbt")
 
 
 def request(path, data=None, content_type="application/json", headers=None, expected_status=None):
@@ -94,6 +95,26 @@ def verify_idempotency():
     assert submit(payload, None)["id"] != submit(payload, None)["id"]
 
 
+def verify_strategy_schema():
+    catalog = json.loads(subprocess.check_output([BINARY, "strategies", "--json"]))
+    schema = json.loads(request("/v1/run-options"))
+    assert schema["strategy_catalog"] == catalog
+    assert schema["properties"]["strategy"]["enum"] == [
+        *(strategy["id"] for strategy in catalog["strategies"]), catalog["comparison_id"]
+    ]
+    assert schema["properties"]["strategy"]["default"] == catalog["default_strategy"]
+    for parameter in catalog["parameters"]:
+        field = schema["properties"][parameter["id"]]
+        assert field["default"] == parameter["default"]
+        value = next(item for item in field["anyOf"] if item["type"] != "null") if "anyOf" in field else field
+        assert value["type"] == parameter["type"]
+        for bound, key in (
+            ("minimum", "minimum"), ("maximum", "maximum"),
+            ("exclusive_minimum", "exclusiveMinimum"), ("exclusive_maximum", "exclusiveMaximum"),
+        ):
+            assert value.get(key) == parameter.get(bound)
+
+
 if __name__ == "__main__":
     for attempt in range(40):
         try:
@@ -103,6 +124,7 @@ if __name__ == "__main__":
             if attempt == 39:
                 raise
             time.sleep(0.5)
+    verify_strategy_schema()
     options = {"strategy": "all", "capital": 1800, "daily_limit": 10, "order_amount": 10, "min_notional": 1}
     status = run(Path("data/sample_btc_1h.csv").read_bytes(), "succeeded", options)
     files = status["artifacts"]
@@ -131,12 +153,16 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as directory:
         tmp = Path(directory)
         (tmp / "manifest.json").write_bytes(request(files["manifest.json"]))
-        subprocess.run([os.environ.get("QBT_BINARY", "target/release/qbt"), "replay",
+        subprocess.run([BINARY, "replay",
                         "--manifest", str(tmp / "manifest.json"), "--input", str(source),
                         "--output", str(tmp / "report.html"), "--summary", str(tmp / "summary.json"),
                         "--equity", str(tmp / "equity.json")], check=True)
         for name in ("summary.json", "equity.json"):
             assert request(files[name]) == (tmp / name).read_bytes()
+    alias = run(source.read_bytes(), "succeeded", {"strategy": "voldca", "order_amount": 24})
+    assert alias["options"]["strategy"] == "VolAdjustedDCA"
+    spec = json.loads(request(alias["artifacts"]["manifest.json"]))["spec"]
+    assert spec["strategies"][0]["VolAdjustedDCA"]["base_amount"] == 1
     failed = run(b"not,a,dataset\n1,2,3\n", "failed", {})
     assert failed["error"] and not failed["artifacts"]
     try:

@@ -6,11 +6,49 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 
+def verify_strategy_fields(page):
+    catalog = page.request.get("http://127.0.0.1:8765/v1/run-options").json()["strategy_catalog"]
+    strategy = page.get_by_label("Strategy", exact=True)
+    expect(strategy).to_have_value(catalog["default_strategy"])
+    assert strategy.locator("option").evaluate_all("(options) => options.map(option => option.value)") == [
+        *(item["id"] for item in catalog["strategies"]), catalog["comparison_id"]
+    ]
+    page.get_by_text("Execution and strategy settings", exact=True).click()
+    selected = {item["id"]: set(item["parameter_ids"]) for item in catalog["strategies"]}
+    selected[catalog["comparison_id"]] = {item["id"] for item in catalog["parameters"]}
+    for choice, applicable in selected.items():
+        strategy.select_option(choice)
+        for parameter in catalog["parameters"]:
+            field = page.locator(f'input[name="{parameter["id"]}"]')
+            if parameter["id"] in applicable:
+                expect(field).to_be_visible()
+                expect(field).to_be_enabled()
+                default = parameter["default"]
+                if default is not None:
+                    assert field.evaluate("(input) => input.valueAsNumber") == default
+            else:
+                expect(field).to_be_hidden()
+                expect(field).to_be_disabled()
+    for item in catalog["strategies"]:
+        for fixed in item["fixed_parameters"]:
+            expect(page.locator(f'input[name="{fixed["id"]}"]')).to_have_count(0)
+    strategy.select_option("DipDCA")
+    dip = page.get_by_label("DipDCA lookback (hours)")
+    dip.fill("72")
+    strategy.select_option("MomentumSMA")
+    expect(dip).to_be_disabled()
+    strategy.select_option("DipDCA")
+    expect(dip).to_have_value("72")
+    dip.fill("168")
+    page.get_by_text("Execution and strategy settings", exact=True).click()
+
+
 with sync_playwright() as playwright:
     chrome = shutil.which("google-chrome") or shutil.which("chromium")
     browser = playwright.chromium.launch(executable_path=chrome)
     page = browser.new_page(viewport={"width": 390, "height": 844})
     page.goto("http://127.0.0.1:8765")
+    verify_strategy_fields(page)
     page.get_by_label("Market data").set_input_files("data/sample_btc_1h.csv")
     page.get_by_label("Strategy", exact=True).select_option("all")
     page.get_by_label("Initial capital").fill("1800")

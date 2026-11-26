@@ -53,6 +53,9 @@ services:
       <<: *app-env
       POLARS_MAX_THREADS: "2"
       RAYON_NUM_THREADS: "2"
+      QBT_WORKER_LEASE_SECONDS: ${QBT_WORKER_LEASE_SECONDS:-30}
+      QBT_WORKER_HEARTBEAT_SECONDS: ${QBT_WORKER_HEARTBEAT_SECONDS:-1}
+      QBT_WORKER_TIMEOUT_SECONDS: ${QBT_WORKER_TIMEOUT_SECONDS:-300}
     command: ["python", "apps/platform/worker.py"]
     depends_on:
       api:

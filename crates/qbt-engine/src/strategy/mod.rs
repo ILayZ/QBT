@@ -1,3 +1,4 @@
+pub mod catalog;
 mod dca;
 mod dip_dca;
 mod indicators;
@@ -7,6 +8,7 @@ mod vol_adjusted_dca;
 
 pub use indicators::{detect_regime, rolling_vol, sma};
 
+use self::catalog::{DCA_ID, DIP_DCA_ID, MOMENTUM_SMA_ID, REGIME_SWITCH_ID, VOL_ADJUSTED_DCA_ID};
 use crate::data::PriceSeries;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -94,11 +96,11 @@ pub trait StrategyEngine: Send + Sync {
 impl Strategy {
     pub fn name(&self) -> &str {
         match self {
-            Strategy::DCA { .. } => "DCA",
-            Strategy::DipDCA { .. } => "DipDCA",
-            Strategy::MomentumSMA { .. } => "MomentumSMA",
-            Strategy::VolAdjustedDCA { .. } => "VolAdjustedDCA",
-            Strategy::RegimeSwitch { .. } => "RegimeSwitch",
+            Strategy::DCA { .. } => DCA_ID,
+            Strategy::DipDCA { .. } => DIP_DCA_ID,
+            Strategy::MomentumSMA { .. } => MOMENTUM_SMA_ID,
+            Strategy::VolAdjustedDCA { .. } => VOL_ADJUSTED_DCA_ID,
+            Strategy::RegimeSwitch { .. } => REGIME_SWITCH_ID,
             Strategy::Custom { name, .. } => name.as_str(),
         }
     }

@@ -20,8 +20,8 @@ def build_id():
         return hashlib.file_digest(binary, "sha256").hexdigest()
 
 
-def connect():
-    return psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row)
+def connect(**kwargs):
+    return psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, **kwargs)
 
 
 def initialize():
