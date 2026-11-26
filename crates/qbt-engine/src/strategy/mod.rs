@@ -155,9 +155,6 @@ impl Strategy {
 
 #[cfg(test)]
 mod tests {
-    use self::catalog::{
-        DCA_ID, DIP_DCA_ID, MOMENTUM_SMA_ID, REGIME_SWITCH_ID, VOL_ADJUSTED_DCA_ID,
-    };
     use super::*;
     use crate::data::Bar;
     use chrono::{TimeZone, Utc};
