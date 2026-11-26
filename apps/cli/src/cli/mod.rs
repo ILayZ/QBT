@@ -1,5 +1,6 @@
 use anyhow::Result;
 use argh::FromArgs;
+use qbt_engine::report::json::DatasetMetadata;
 use qbt_engine::run::{BUILTINS, RunSpec, builtin_strategy};
 use qbt_engine::strategy::catalog::{
     COMPARISON_ID, DEFAULT_DCA_AMOUNT, DEFAULT_DCA_INTERVAL, DEFAULT_DIP_LOOKBACK,
@@ -22,6 +23,8 @@ pub struct Cli {
 pub enum Command {
     /// Run a backtest on a price series
     Run(RunArgs),
+    /// Validate and describe an hourly OHLCV dataset
+    InspectDataset(InspectDatasetArgs),
     /// Replay a saved run
     Replay(ReplayArgs),
     /// Evaluate fixed parameters across independent time windows
@@ -36,9 +39,15 @@ pub enum Command {
 #[derive(FromArgs)]
 #[argh(subcommand, name = "run")]
 pub struct RunArgs {
-    /// input CSV file (OHLCV)
+    /// input CSV or Parquet file (OHLCV)
     #[argh(option)]
     pub input: PathBuf,
+    /// market symbol to record in the results
+    #[argh(option)]
+    pub symbol: Option<String>,
+    /// quote currency to record in the results
+    #[argh(option)]
+    pub quote_currency: Option<String>,
     /// output report path
     #[argh(option, default = r#"std::path::PathBuf::from("report.html")"#)]
     pub output: PathBuf,
@@ -95,6 +104,32 @@ pub struct RunArgs {
     pub risk_free: f64,
 }
 
+/// Print JSON metadata for a valid hourly OHLCV dataset
+#[derive(FromArgs)]
+#[argh(subcommand, name = "inspect-dataset")]
+pub struct InspectDatasetArgs {
+    /// input CSV or Parquet file (OHLCV)
+    #[argh(option)]
+    pub input: PathBuf,
+}
+
+impl InspectDatasetArgs {
+    pub fn execute(&self) -> Result<()> {
+        let series = qbt_engine::data::PriceSeries::from_path(&self.input, "DATA".to_string())?;
+        println!(
+            "{}",
+            serde_json::json!({
+                "schema_version": 1,
+                "timeframe": "1h",
+                "row_count": series.len(),
+                "start": series.bars[0].timestamp,
+                "end": series.bars[series.len() - 1].timestamp,
+            })
+        );
+        Ok(())
+    }
+}
+
 /// Replay a saved run against its original dataset
 #[derive(FromArgs)]
 #[argh(subcommand, name = "replay")]
@@ -102,7 +137,7 @@ pub struct ReplayArgs {
     /// saved JSON run manifest
     #[argh(option)]
     pub manifest: PathBuf,
-    /// input CSV file (OHLCV)
+    /// input CSV or Parquet file (OHLCV)
     #[argh(option)]
     pub input: PathBuf,
     /// output report path
@@ -123,7 +158,7 @@ pub struct ReplayArgs {
 #[derive(FromArgs)]
 #[argh(subcommand, name = "walk-forward")]
 pub struct WalkForwardArgs {
-    /// input CSV file
+    /// input CSV or Parquet file
     #[argh(option)]
     pub input: PathBuf,
     /// trailing hourly closes used by DipDCA
@@ -195,7 +230,11 @@ impl RunArgs {
             anyhow::bail!("Slippage must be in [0, 1), got {}", self.slippage);
         }
 
-        let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
+        let dataset_metadata = DatasetMetadata {
+            symbol: self.symbol.clone(),
+            quote_currency: self.quote_currency.clone(),
+        };
+        let series = PriceSeries::from_path(&self.input, series_symbol(&dataset_metadata))?;
 
         let include_benchmarks = self.strategy.eq_ignore_ascii_case(COMPARISON_ID);
         let names = if include_benchmarks {
@@ -251,10 +290,11 @@ impl RunArgs {
         ])?;
         if let Some(path) = &self.save_manifest {
             anyhow::ensure!(!path.try_exists()?, "Choose a new manifest path");
-            let manifest = RunManifest::new(&series, spec)?;
+            let manifest = RunManifest::new(&series, spec, dataset_metadata)?;
             render(
                 &manifest.spec,
                 &series,
+                &manifest.dataset_metadata,
                 &self.output,
                 self.ledger.as_deref(),
                 self.summary.as_deref(),
@@ -265,6 +305,7 @@ impl RunArgs {
             render(
                 &spec,
                 &series,
+                &dataset_metadata,
                 &self.output,
                 self.ledger.as_deref(),
                 self.summary.as_deref(),
@@ -287,12 +328,14 @@ impl ReplayArgs {
             self.summary.as_deref(),
             self.equity.as_deref(),
         ])?;
-        let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
         let manifest = RunManifest::load(&self.manifest)?;
+        let series =
+            PriceSeries::from_path(&self.input, series_symbol(&manifest.dataset_metadata))?;
         manifest.verify(&series)?;
         render(
             &manifest.spec,
             &series,
+            &manifest.dataset_metadata,
             &self.output,
             self.ledger.as_deref(),
             self.summary.as_deref(),
@@ -301,9 +344,14 @@ impl ReplayArgs {
     }
 }
 
+fn series_symbol(metadata: &DatasetMetadata) -> String {
+    metadata.symbol.clone().unwrap_or_else(|| "DATA".to_owned())
+}
+
 fn render(
     spec: &RunSpec,
     series: &qbt_engine::data::PriceSeries,
+    metadata: &DatasetMetadata,
     output: &Path,
     ledger_path: Option<&Path>,
     summary_path: Option<&Path>,
@@ -344,7 +392,7 @@ fn render(
         w.flush()?;
     }
     if let Some(path) = summary_path {
-        qbt_engine::report::json::summary(path, &results)?;
+        qbt_engine::report::json::summary_with_metadata(path, &results, metadata)?;
     }
     if let Some(path) = equity_path {
         qbt_engine::report::json::equity(path, series, &results)?;
@@ -386,7 +434,7 @@ impl WalkForwardArgs {
         )?;
         let strategy_factory = move |_, _| strategy.clone();
 
-        let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
+        let series = PriceSeries::from_path(&self.input, "DATA".to_string())?;
         let bt = Backtester::new(BacktestConfig::default());
 
         let wf_config = WalkForwardConfig {

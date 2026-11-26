@@ -32,6 +32,10 @@ def database_result(db, run_id):
         f"""
         SELECT json_build_object(
             'dataset', d.id,
+            'format', d.format,
+            'symbol', d.symbol,
+            'quote_currency', d.quote_currency,
+            'validation', d.validation,
             'input_sha256', encode(sha256(d.csv), 'hex'),
             'state', r.state,
             'artifacts', (
@@ -55,8 +59,11 @@ def main():
     assert port_bindings == {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": BASE.rsplit(":", 1)[1]}]}, port_bindings
 
     source = Path("data/sample_btc_1h.csv").read_bytes()
-    dataset = json.loads(request("/v1/datasets", source, "text/csv"))["id"]
+    metadata = json.loads(request("/v1/datasets?symbol=BTC&quote_currency=USD", source, "text/csv"))
+    dataset = metadata["id"]
     assert dataset == hashlib.sha256(source).hexdigest()
+    assert metadata["row_count"] == 4320 and metadata["schema_version"] == 1
+    assert json.loads(request(f"/v1/datasets/{dataset}")) == metadata
     payload = json.dumps({"dataset": dataset, "options": {"strategy": "all", "capital": 1800}}).encode()
     job = json.loads(request("/v1/runs", payload))
     run_id = UUID(job["id"])
@@ -76,8 +83,13 @@ def main():
         assert json.loads(artifacts[name])["version"] == 1
     assert json.loads(artifacts["manifest.json"])["spec"]["include_benchmarks"]
 
+    assert json.loads(artifacts["summary.json"])["quote_currency"] == "USD"
     expected = {
         "dataset": dataset,
+        "format": "csv",
+        "symbol": "BTC",
+        "quote_currency": "USD",
+        "validation": {key: metadata[key] for key in ("schema_version", "timeframe", "row_count", "start", "end")},
         "input_sha256": dataset,
         "state": "succeeded",
         "artifacts": {name: hashlib.sha256(data).hexdigest() for name, data in artifacts.items()},

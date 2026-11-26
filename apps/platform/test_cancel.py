@@ -49,7 +49,8 @@ time.sleep(120)
     browser = playwright.chromium.launch(executable_path=shutil.which("google-chrome") or shutil.which("chromium"))
     page = browser.new_page()
     http = page.request
-    dataset = http.post(f"{BASE}/v1/datasets", headers={"Content-Type": "text/csv"}, data="x\n1\n").json()["id"]
+    dataset = http.post(f"{BASE}/v1/datasets", headers={"Content-Type": "text/csv"},
+                        data=Path("data/sample_btc_1h.csv").read_bytes()).json()["id"]
     queued = enqueue(build, dataset)
     page.goto(BASE + "/?run=" + queued.rsplit("/", 1)[1])
     page.get_by_role("button", name="Cancel run").click()

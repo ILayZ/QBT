@@ -33,6 +33,12 @@ def initialize():
                 id text PRIMARY KEY,
                 csv bytea NOT NULL
             );
+            ALTER TABLE qbt_datasets
+                ADD COLUMN IF NOT EXISTS format text NOT NULL DEFAULT 'csv'
+                    CHECK (format IN ('csv', 'parquet')),
+                ADD COLUMN IF NOT EXISTS symbol text,
+                ADD COLUMN IF NOT EXISTS quote_currency text,
+                ADD COLUMN IF NOT EXISTS validation jsonb;
             CREATE TABLE IF NOT EXISTS qbt_runs (
                 id uuid PRIMARY KEY,
                 dataset text NOT NULL REFERENCES qbt_datasets(id),

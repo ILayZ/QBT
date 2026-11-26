@@ -97,13 +97,16 @@ def renew(run, lease, *, timeout=RENEW_TIMEOUT_SECONDS):
 
 def simulate(run, work, settings):
     with connect(connect_timeout=5) as db:
-        content = db.execute("SELECT csv FROM qbt_datasets WHERE id = %s", (run["dataset"],)).fetchone()["csv"]
-    source = work / "input.csv"
-    source.write_bytes(content)
+        dataset = db.execute("""
+            SELECT csv, format, symbol, quote_currency FROM qbt_datasets WHERE id = %s
+        """, (run["dataset"],)).fetchone()
+    source = work / f"input.{dataset['format']}"
+    source.write_bytes(dataset["csv"])
     cmd = [str(BINARY), "run", "--input", str(source), "--output", str(work / "report.html"),
            "--ledger", str(work / "orders.csv"), "--save-manifest", str(work / "manifest.json"),
            "--summary", str(work / "summary.json"), "--equity", str(work / "equity.json")]
-    for name, value in run["options"].items():
+    options = {**run["options"], "symbol": dataset["symbol"], "quote_currency": dataset["quote_currency"]}
+    for name, value in options.items():
         flag = "--" + name.replace("_", "-")
         if isinstance(value, bool):
             if value:

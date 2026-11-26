@@ -13,6 +13,7 @@ fn main() -> Result<()> {
     let cli: Cli = argh::from_env();
 
     match &cli.command {
+        Command::InspectDataset(args) => args.execute(),
         Command::Replay(args) => args.execute(),
         Command::Run(args) => args.execute(),
         Command::WalkForward(args) => args.execute(),

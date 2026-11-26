@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use qbt_engine::data::PriceSeries;
-use qbt_engine::run::RunSpec;
+use qbt_engine::{report::json::DatasetMetadata, run::RunSpec};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -14,6 +14,8 @@ pub struct RunManifest {
     executable_xxh3_128: String,
     bars_xxh3_128: String,
     pub spec: RunSpec,
+    #[serde(default, skip_serializing_if = "DatasetMetadata::is_empty")]
+    pub dataset_metadata: DatasetMetadata,
 }
 
 fn executable_hash() -> Result<String> {
@@ -43,12 +45,17 @@ fn bars_hash(series: &PriceSeries) -> String {
 }
 
 impl RunManifest {
-    pub fn new(series: &PriceSeries, spec: RunSpec) -> Result<Self> {
+    pub fn new(
+        series: &PriceSeries,
+        spec: RunSpec,
+        dataset_metadata: DatasetMetadata,
+    ) -> Result<Self> {
         Ok(Self {
             version: 1,
             executable_xxh3_128: executable_hash()?,
             bars_xxh3_128: bars_hash(series),
             spec,
+            dataset_metadata,
         })
     }
 

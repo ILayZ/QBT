@@ -17,6 +17,11 @@ services:
     build:
       context: .
     pull_policy: build
+    environment:
+      <<: *app-env
+      POLARS_MAX_THREADS: "1"
+    tmpfs:
+      - /tmp:size=128m,mode=1777
     command:
       - python
       - -m

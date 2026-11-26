@@ -93,7 +93,7 @@ class WorkerRecoveryTest(unittest.TestCase):
         self.run_id = uuid4()
         dataset = self.run_id.hex
         with connect() as db:
-            db.execute("INSERT INTO qbt_datasets VALUES (%s, %s)", (dataset, b"x\n1\n"))
+            db.execute("INSERT INTO qbt_datasets (id, csv) VALUES (%s, %s)", (dataset, b"x\n1\n"))
             db.execute("INSERT INTO qbt_runs (id, dataset, build, options) VALUES (%s, %s, %s, %s)",
                        (self.run_id, dataset, self.build, Jsonb({})))
         self.addCleanup(self.remove_run, dataset)

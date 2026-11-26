@@ -12,13 +12,13 @@ HTTP is published on `127.0.0.1:8765`. Set `QBT_PORT` before starting the stack 
 
 The worker executes one simulation at a time with two CPUs, 1 GiB of memory, and 128 MiB of temporary storage. A simulation has a five-minute execution timeout. The API runs one process on one CPU with a 512 MiB memory limit and a Uvicorn concurrency limit of 32. PostgreSQL has one CPU, 512 MiB of memory, and at most 64 connections. Dataset, run, and artifact tables share the `qbt_postgres-data` volume. Plan disk space for the build cache, database, and backups.
 
-Open http://127.0.0.1:8765 in a browser to upload a CSV, choose a strategy or compare all five, and download results. Open a previous result from Run history or bookmark its URL. History includes runs submitted directly through the API. Use `GET /v1/runs?limit=20` to list recent runs and pass the returned `next` ID as `before` for the following page. The form loads the running build’s strategy catalog from `GET /v1/run-options` and shows the fields for the selected strategy. Comparison shows all available strategy fields. The endpoint includes the existing JSON Schema and a `strategy_catalog` entry identical to `qbt strategies --json`. Strategy IDs and aliases are case-insensitive. Fixed algorithm settings are listed in `fixed_parameters`.
+Open http://127.0.0.1:8765 in a browser to upload CSV or Parquet data or select a saved dataset, choose a strategy or compare all five, and download results. Open a previous result from Run history or bookmark its URL. History includes runs submitted directly through the API. Use `GET /v1/runs?limit=20` to list recent runs and pass the returned `next` ID as `before` for the following page. The form loads the running build’s strategy catalog from `GET /v1/run-options` and shows the fields for the selected strategy. Comparison shows all available strategy fields. The endpoint includes the existing JSON Schema and a `strategy_catalog` entry identical to `qbt strategies --json`. Strategy IDs and aliases are case-insensitive. Fixed algorithm settings are listed in `fixed_parameters`.
 
 In a second shell, upload the sample and submit a comparison. These examples use jq.
 
 ```bash
 base=http://127.0.0.1:8765
-dataset=$(curl -fsS -H 'Content-Type: text/csv' --data-binary @data/sample_btc_1h.csv "$base/v1/datasets" | jq -r .id)
+dataset=$(curl -fsS -H 'Content-Type: text/csv' --data-binary @data/sample_btc_1h.csv "$base/v1/datasets?symbol=BTC&quote_currency=USD" | jq -r .id)
 run=$(curl -fsS -H 'Content-Type: application/json' -d "$(jq -nc --arg id "$dataset" '{dataset:$id,options:{strategy:"all",capital:1800,order_amount:10,daily_limit:10}}')" "$base/v1/runs" | jq -r .id)
 curl -fsS "$base/v1/runs/$run" | jq
 # After state becomes succeeded:
@@ -27,7 +27,11 @@ curl -fsS "$base/v1/runs/$run/artifacts/orders.csv" -o orders.csv
 curl -fsS "$base/v1/runs/$run/artifacts/manifest.json" -o manifest.json
 ```
 
-Interactive endpoint documentation is at `/docs`. Upload accepts raw CSV up to 8 MiB. Identical bytes share one dataset ID. Upload records the bytes, and the engine validates the bars during a run. A failed simulation exposes its error through the status endpoint.
+Interactive endpoint documentation is at `/docs`. Send raw data up to 8 MiB to `POST /v1/datasets` with `Content-Type: text/csv` or `application/vnd.apache.parquet`. QBT validates the bars before saving them. Invalid data returns HTTP 422 with a diagnostic. Failed simulations expose their errors through the run status endpoint.
+
+The catalog uses the SHA-256 of the uploaded bytes as the dataset ID. Uploading the same bytes returns the existing ID. Changing the bytes creates a new entry. Optional `symbol` and `quote_currency` query parameters can fill missing metadata. Changing a recorded value for the same ID returns HTTP 409. Values must start with an ASCII letter or digit and may include periods, underscores, colons, slashes and hyphens, up to 64 characters.
+
+Use `GET /v1/datasets` to list saved datasets and `GET /v1/datasets/{id}` for one entry. The response includes format, symbol, quote currency, validation schema version, timeframe, row count and inclusive UTC start and end. Datasets saved before validation have null validation fields and their IDs remain usable. Reuploading their original bytes records validation metadata if the bars pass.
 
 To retry a submission safely, send an optional `Idempotency-Key` header with `POST /v1/runs`. Use one case-sensitive key of 1 to 128 visible ASCII characters without commas, such as a UUID. The key applies across the local service. A retry with the same dataset ID and validated options, including defaults, returns HTTP 202 with the original run ID and its current state, even after completion. Reusing a key with a different dataset or options returns HTTP 409. Each request without the header creates a new run. Keys are retained with their runs.
 
@@ -92,4 +96,4 @@ Then stop the worker with `docker compose stop worker`, take a backup, and run t
 
 New single and comparison runs publish `summary.json` and `equity.json` alongside the HTML, ledger and manifest. Discover available artifacts through `GET /v1/runs/{id}`. Earlier runs retain their original downloads. For a local run or replay, pass `--summary summary.json --equity equity.json`.
 
-Both JSON documents carry `version: 1`. Summary returns, drawdowns and weights are fractions. Equity, DCA differences and reserves use the input's quote currency. Completed trades count closed trades, while the ledger includes buys and skipped orders. DCA differences are null when DCA is absent. Reserve fields apply to DipDCA. Equity contains one ordered UTC bar timestamp array and one equally long array of close valuations per portfolio, including benchmarks. Values retain engine precision.
+Both JSON documents carry `version: 1`. The summary includes `symbol` and `quote_currency` when supplied with the dataset. The replay manifest records these values so replay reproduces the summary. Summary returns, drawdowns and weights are fractions. Equity, DCA differences and reserves use the input's quote currency. Completed trades count closed trades, while the ledger includes buys and skipped orders. DCA differences are null when DCA is absent. Reserve fields apply to DipDCA. Equity contains one ordered UTC bar timestamp array and one equally long array of close valuations per portfolio, including benchmarks. Values retain engine precision.

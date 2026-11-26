@@ -151,10 +151,6 @@ impl Backtester {
                 "Budget must be finite and positive"
             );
         }
-        // CF-017: Validate nonempty data and finite, economically valid inputs at engine boundary
-        if series.is_empty() {
-            anyhow::bail!("Price series is empty");
-        }
         if !self.config.initial_capital.is_finite() || self.config.initial_capital <= 0.0 {
             anyhow::bail!("Initial capital must be positive");
         }
@@ -164,28 +160,7 @@ impl Backtester {
         if !(0.0..1.0).contains(&self.config.slippage) {
             anyhow::bail!("Slippage must be in [0, 1)");
         }
-        // Validate all prices are finite and positive
-        for (i, bar) in series.bars.iter().enumerate() {
-            if !bar.close.is_finite() || bar.close <= 0.0 {
-                anyhow::bail!(
-                    "Invalid price at bar {}: {} (must be finite and positive)",
-                    i,
-                    bar.close
-                );
-            }
-            if !bar.open.is_finite() || bar.open <= 0.0 {
-                anyhow::bail!("Invalid open price at bar {}: {}", i, bar.open);
-            }
-            if !bar.high.is_finite() || bar.high <= 0.0 {
-                anyhow::bail!("Invalid high price at bar {}: {}", i, bar.high);
-            }
-            if !bar.low.is_finite() || bar.low <= 0.0 {
-                anyhow::bail!("Invalid low price at bar {}: {}", i, bar.low);
-            }
-            if !bar.volume.is_finite() || bar.volume < 0.0 {
-                anyhow::bail!("Invalid volume at bar {}: {}", i, bar.volume);
-            }
-        }
+        series.validate()?;
 
         info!(
             symbol = %series.symbol,
@@ -194,7 +169,6 @@ impl Backtester {
             "Starting backtest"
         );
 
-        series.validate_hourly()?;
         let allocation = if let Strategy::DipDCA {
             daily_allocation,
             lookback_hours,
@@ -465,9 +439,7 @@ impl Backtester {
         if wf_config.step_months == 0 {
             anyhow::bail!("Walk-forward step_months must be positive");
         }
-        if series.is_empty() {
-            anyhow::bail!("Price series is empty");
-        }
+        series.validate()?;
 
         info!(
             train_months = wf_config.train_months,
@@ -475,7 +447,6 @@ impl Backtester {
             "Starting walk-forward analysis"
         );
 
-        series.validate_hourly()?;
         let total_bars = series.len();
         let bar_per_day = 24usize; // assume hourly bars
         let train_bars = (wf_config.train_months as usize) * 30 * bar_per_day;
