@@ -1,12 +1,12 @@
-# qbacktest — Launch Checklist
+# QBT — Launch Checklist
 
-Purpose: take qbacktest from "working binary" to "live and acquiring customers" with
+Purpose: take QBT from "working binary" to "live and acquiring customers" with
 the least friction once the release build and E2E pass. Items are grouped by whether
 they are autonomous (no approval) or require human authorization (B2).
 
 ## A. Pre-launch verification (AUTONOMOUS — runs after build completes)
 
-- [ ] 1. `cargo build --release` completes; `target/release/qbacktest` exists.
+- [ ] 1. `cargo build --release` completes; `target/release/qbt` exists.
 - [ ] 2. `scripts/e2e_verify.sh` passes (binary, strategies --verbose, DCA run,
         walk-forward, HTML report present + non-trivial, metrics sane).
 - [ ] 3. Fix B7/P1 — walk_forward must slice the OOS window (backtest/mod.rs:

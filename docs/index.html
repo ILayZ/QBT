@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>qbacktest — Fast, scriptable backtesting</title>
+<title>QBT — Fast, scriptable backtesting</title>
 <style>
   :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --card:#161b22; --border:#30363d; }
   * { box-sizing:border-box; }
@@ -25,7 +25,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>qbacktest<span>.</span></h1>
+  <h1>QBT<span>.</span></h1>
   <p class="sub">Backtest in seconds. Own your data. — a fast, scriptable, reproducible backtesting engine for retail traders &amp; quant hobbyists. No cloud. No lock-in.</p>
 
   <a class="cta" href="#">Download for Linux (free)</a>
@@ -42,7 +42,7 @@
 
   <h2>Quick start</h2>
 <pre><code># DCA backtest on your OHLCV data
-qbacktest run --input btc_1h.csv --strategy DCA \
+qbt run --input btc_1h.csv --strategy DCA \
   --dca-interval 24 --dca-amount 100 --capital 10000 \
   --output report.html</code></pre>
 
@@ -54,7 +54,7 @@ qbacktest run --input btc_1h.csv --strategy DCA \
       <tr style="border-bottom:2px solid var(--border);text-align:left;">
         <th style="padding:.6rem;">Cloud platforms</th>
         <th style="padding:.6rem;">Python notebooks</th>
-        <th style="padding:.6rem;color:var(--accent);">qbacktest</th>
+        <th style="padding:.6rem;color:var(--accent);">QBT</th>
       </tr>
     </thead>
     <tbody style="color:var(--muted);">
@@ -81,10 +81,10 @@ qbacktest run --input btc_1h.csv --strategy DCA \
   <p style="color:var(--muted);font-size:.9rem;">Pro price is a proposal pending demand validation — pay-what-you-want launch may apply. Payments not yet enabled.</p>
 
   <h2>About</h2>
-  <p style="color:var(--muted);">qbacktest is a fast, scriptable, reproducible backtesting engine for retail traders and quant hobbyists. A single Rust CLI binary reads CSV or Parquet, runs a strategy (DCA, MomentumSMA, VolAdjustedDCA, or your own), computes standard risk-adjusted metrics (Sharpe, Sortino, max drawdown, profit factor), and outputs a self-contained HTML report — no cloud, no subscriptions, no Python environment. Data stays on your machine.</p>
+  <p style="color:var(--muted);">QBT is a fast, scriptable, reproducible backtesting engine for retail traders and quant hobbyists. A single Rust CLI binary reads CSV or Parquet, runs a strategy (DCA, MomentumSMA, VolAdjustedDCA, or your own), computes standard risk-adjusted metrics (Sharpe, Sortino, max drawdown, profit factor), and outputs a self-contained HTML report — no cloud, no subscriptions, no Python environment. Data stays on your machine.</p>
 
   <div class="footer">
-    qbacktest — open-source core with a paid Pro tier (extra strategies, automated reports, portfolio backtests). © 2026
+    QBT — open-source core with a paid Pro tier (extra strategies, automated reports, portfolio backtests). © 2026
   </div>
 </div>
 </body>
