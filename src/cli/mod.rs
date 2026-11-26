@@ -195,7 +195,13 @@ impl RunArgs {
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
 
         let names = if self.strategy.eq_ignore_ascii_case("all") {
-            vec!["DCA", "DipDCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch"]
+            vec![
+                "DCA",
+                "DipDCA",
+                "VolAdjustedDCA",
+                "MomentumSMA",
+                "RegimeSwitch",
+            ]
         } else {
             vec![self.strategy.as_str()]
         };
@@ -207,7 +213,16 @@ impl RunArgs {
         let vol_base = self.order_amount.map_or(self.dca_amount, |v| v / 24.0);
         let strategies = names
             .iter()
-            .map(|name| builtin_strategy(name, self.dca_interval, amount, vol_base, self.dip_lookback, self.dip_percent))
+            .map(|name| {
+                builtin_strategy(
+                    name,
+                    self.dca_interval,
+                    amount,
+                    vol_base,
+                    self.dip_lookback,
+                    self.dip_percent,
+                )
+            })
             .collect::<Result<Vec<_>>>()?;
         let budget = BuyBudget {
             daily_limit: self.daily_limit,
@@ -314,7 +329,14 @@ impl WalkForwardArgs {
             anyhow::bail!("Step months must be positive, got 0");
         }
 
-        let strategy = builtin_strategy(&self.strategy, 24, 100.0, 100.0, self.dip_lookback, self.dip_percent)?;
+        let strategy = builtin_strategy(
+            &self.strategy,
+            24,
+            100.0,
+            100.0,
+            self.dip_lookback,
+            self.dip_percent,
+        )?;
         let strategy_factory = move |_, _| strategy.clone();
 
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
@@ -378,7 +400,9 @@ impl StrategiesArgs {
             println!("• {} - {}", name, desc);
             if self.verbose {
                 match name {
-                    "DipDCA" => println!("    Parameters: daily allocation, dip-lookback, dip-percent"),
+                    "DipDCA" => {
+                        println!("    Parameters: daily allocation, dip-lookback, dip-percent")
+                    }
                     "DCA" => println!("    Parameters: interval_hours, amount"),
                     "MomentumSMA" => {
                         println!("    Parameters: lookback, buy_threshold, sell_threshold")

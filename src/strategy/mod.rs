@@ -60,6 +60,7 @@ impl fmt::Display for Regime {
 /// Strategy signal (buy/sell/hold)
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Signal {
+    BuyReserve,
     Buy { amount: f64 },
     Sell { amount: f64 },
     Hold,
@@ -148,7 +149,11 @@ impl Strategy {
     pub fn generate_signals(&self, series: &PriceSeries) -> Vec<Signal> {
         let closes = series.closes();
         match self {
-            Strategy::DipDCA { lookback_hours, drop_fraction, .. } => {
+            Strategy::DipDCA {
+                lookback_hours,
+                drop_fraction,
+                ..
+            } => {
                 let mut signals = vec![Signal::Hold; closes.len()];
                 // Keep candidate peak indices in descending price order.
                 let mut peaks = std::collections::VecDeque::<usize>::new();
@@ -161,8 +166,9 @@ impl Strategy {
                         peaks.pop_back();
                     }
                     peaks.push_back(i);
-                    if i + 1 >= *lookback_hours && close <= closes[peaks[0]] * (1.0 - drop_fraction) {
-                        signals[i] = Signal::Buy { amount: f64::MAX };
+                    if i + 1 >= *lookback_hours && close <= closes[peaks[0]] * (1.0 - drop_fraction)
+                    {
+                        signals[i] = Signal::BuyReserve;
                     }
                 }
                 signals

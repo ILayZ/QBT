@@ -195,14 +195,27 @@ impl Backtester {
         );
 
         series.validate_hourly()?;
-        let allocation = if let Strategy::DipDCA { daily_allocation, lookback_hours, drop_fraction } = strategy {
-            anyhow::ensure!(daily_allocation.is_finite() && *daily_allocation > 0.0, "Daily allocation must be finite and positive");
-            anyhow::ensure!(*lookback_hours >= 2 && *drop_fraction > 0.0 && *drop_fraction < 1.0, "DipDCA requires at least two closes and a drop between 0 and 100 percent");
+        let allocation = if let Strategy::DipDCA {
+            daily_allocation,
+            lookback_hours,
+            drop_fraction,
+        } = strategy
+        {
+            anyhow::ensure!(
+                daily_allocation.is_finite() && *daily_allocation > 0.0,
+                "Daily allocation must be finite and positive"
+            );
+            anyhow::ensure!(
+                *lookback_hours >= 2 && *drop_fraction > 0.0 && *drop_fraction < 1.0,
+                "DipDCA requires at least two closes and a drop between 0 and 100 percent"
+            );
             Some(*daily_allocation)
         } else {
             None
         };
-        let mut reserve = allocation.unwrap_or_default().min(self.config.initial_capital);
+        let mut reserve = allocation
+            .unwrap_or_default()
+            .min(self.config.initial_capital);
         let mut waiting = 0;
         let mut max_waiting = 0;
         let signals = strategy.generate_signals(series);
@@ -244,14 +257,14 @@ impl Backtester {
             };
             let mut dip_filled = false;
             match signal {
-                Signal::Buy { amount } if !single_position || lots.is_empty() => {
+                Signal::Buy { .. } | Signal::BuyReserve if !single_position || lots.is_empty() => {
                     let buy_price = exec_price * (1.0 + self.config.slippage);
-                    let requested = if allocation.is_some() {
-                        reserve / (1.0 + self.config.trading_fee)
-                    } else if single_position {
-                        budget.entry_amount.unwrap_or(*amount)
-                    } else {
-                        *amount
+                    let requested = match signal {
+                        Signal::Buy { amount } if single_position => {
+                            budget.entry_amount.unwrap_or(*amount)
+                        }
+                        Signal::Buy { amount } => *amount,
+                        _ => reserve / (1.0 + self.config.trading_fee),
                     };
                     let fee_factor = if budget.include_fees {
                         1.0 + self.config.trading_fee
@@ -296,7 +309,11 @@ impl Backtester {
                     } else {
                         cash -= total_cost;
                         if allocation.is_some() {
-                            reserve = if amount == requested { 0.0 } else { reserve - total_cost };
+                            reserve = if amount == requested {
+                                0.0
+                            } else {
+                                reserve - total_cost
+                            };
                             dip_filled = true;
                         }
                         spent = if requested >= remaining / fee_factor {
@@ -384,7 +401,7 @@ impl Backtester {
                         record(event("sell", "no_position", exec_price, 0.0, 0.0, cash))?;
                     }
                 }
-                Signal::Buy { .. } => {
+                Signal::Buy { .. } | Signal::BuyReserve => {
                     skipped_buys += 1;
                     record(event("buy", "position_open", exec_price, 0.0, 0.0, cash))?;
                 }
@@ -753,13 +770,18 @@ mod tests {
             ..BuyBudget::default()
         };
         let mut fills = Vec::new();
-        let result = bt.run_with_budget(&series, &strategy, &budget, |event| {
-            if event.status == "filled" {
-                fills.push((event.signal_time, event.execution_time, event.cash));
-            }
-            Ok(())
-        }).unwrap();
-        assert_eq!(fills, vec![(series.bars[48].timestamp, series.bars[49].timestamp, 70.0)]);
+        let result = bt
+            .run_with_budget(&series, &strategy, &budget, |event| {
+                if event.status == "filled" {
+                    fills.push((event.signal_time, event.execution_time, event.cash));
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            fills,
+            vec![(series.bars[48].timestamp, series.bars[49].timestamp, 70.0)]
+        );
         assert!(result.below_minimum_buys > 0);
         assert_eq!(result.dip_reserve, Some(0.0));
         assert_eq!(result.final_value, 100.0);

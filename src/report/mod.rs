@@ -45,8 +45,13 @@ impl HtmlReport {
             .collect();
 
             if let Some(reserve) = r.dip_reserve {
-                table_rows.push(format!("<tr><td>Unspent reserve</td><td>${reserve:.2}</td></tr>"));
-                table_rows.push(format!("<tr><td>Longest funded wait</td><td>{} hours</td></tr>", r.max_reserve_wait_hours));
+                table_rows.push(format!(
+                    "<tr><td>Unspent reserve</td><td>${reserve:.2}</td></tr>"
+                ));
+                table_rows.push(format!(
+                    "<tr><td>Longest funded wait</td><td>{} hours</td></tr>",
+                    r.max_reserve_wait_hours
+                ));
             }
             sections.push(format!(
                 "<div class=\"report-section\"><h2>{}</h2><table>{}</table></div>",
