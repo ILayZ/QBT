@@ -1,0 +1,16 @@
+**
+!Cargo.toml
+!Cargo.lock
+!apps/
+!apps/cli/
+!apps/cli/**
+!apps/platform/
+!apps/platform/**
+!apps/web/
+!apps/web/**
+!crates/
+!crates/qbt-engine/
+!crates/qbt-engine/**
+**/__pycache__/
+**/.env*
+apps/platform/test_*.py

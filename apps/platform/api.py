@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from psycopg import OperationalError
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 from starlette.concurrency import run_in_threadpool
@@ -102,6 +103,16 @@ app.mount("/ui", StaticFiles(directory=WEB), name="ui")
 @app.get("/", include_in_schema=False)
 def workspace():
     return FileResponse(WEB / "index.html")
+
+
+@app.get("/healthz", include_in_schema=False)
+def health():
+    try:
+        with connect() as db:
+            db.execute("SELECT 1")
+    except OperationalError:
+        raise HTTPException(503, "Database unavailable") from None
+    return {"status": "ok"}
 
 
 @app.get("/v1/run-options")
