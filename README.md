@@ -20,7 +20,7 @@ Fast, reproducible, and yours.
 
 - **Single static binary** — no runtime, no package manager, no virtualenv.
 - **Real backtesting** — configurable initial capital, trading fee, slippage, risk-free rate.
-- **Built-in strategies:** DCA (dollar-cost averaging), MomentumSMA, VolAdjustedDCA.
+- **Built-in strategies:** DCA, DipDCA, MomentumSMA, VolAdjustedDCA and RegimeSwitch.
 - **Windowed evaluation** — each test window starts with fresh capital and indicators. The CLI uses fixed parameters. It reports mean window return and the fraction of profitable windows.
 - **Metrics:** total/annualized return, Sharpe, Sortino, max drawdown, win rate, profit factor, volatility.
 - **HTML report** — self-contained, shareable, with charts.
@@ -93,7 +93,7 @@ A ready-to-use 180-day sample dataset is included at `data/sample_btc_1h.csv`.
 | `--slippage` | `0.0005` | Slippage (fraction) |
 | `--risk-free` | `0.03` | Annual risk-free rate |
 
-Compare all four strategies on independent accounts funded once at the start:
+Compare all five strategies on independent accounts funded once at the start:
 
 ```bash
 qbacktest run --input data/sample_btc_1h.csv --strategy all --capital 1800 \
@@ -118,7 +118,23 @@ equity and compares final value against DCA, drawdown, mean invested share acros
 bar closes, and skipped buy counts. The cash benchmark earns zero interest.
 Buy and hold invests the initial balance at the first executable open, with the
 same fee, slippage and order minimum; the daily allocation limit applies only
-to the four strategies.
+to the five strategies.
+
+### DipDCA
+
+```bash
+qbacktest run --input data/sample_btc_1h.csv --strategy DipDCA --capital 1800 \
+  --order-amount 10 --dip-percent 5 --dip-lookback 168 --min-notional 1 --ledger dip.csv
+```
+
+DipDCA earmarks up to the daily allocation from existing cash at the start and
+on each new UTC date. After a full trailing window (including the current close),
+a close at least the configured percentage below its highest close signals a buy
+at the next open. While the condition persists, each qualifying close can trigger
+a purchase. The reserve covers entry fees; only fills consume it. By default a
+fill may spend several days of accumulated cash. Add `--daily-limit 10` to cap
+execution separately. The report includes unspent reserve and the longest run
+of hourly execution bars with a funded reserve and no purchase.
 
 ### `walk-forward`
 
