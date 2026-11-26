@@ -118,7 +118,9 @@ impl Strategy {
                 lookback,
                 buy_threshold,
                 sell_threshold,
-            } => momentum_sma::signals(&series.closes(), *lookback, *buy_threshold, *sell_threshold),
+            } => {
+                momentum_sma::signals(&series.closes(), *lookback, *buy_threshold, *sell_threshold)
+            }
             Strategy::VolAdjustedDCA {
                 base_amount,
                 vol_lookback,
@@ -134,7 +136,13 @@ impl Strategy {
                 slow_sma,
                 buy_regime,
                 sell_regime,
-            } => regime_switch::signals(&series.closes(), *fast_sma, *slow_sma, *buy_regime, *sell_regime),
+            } => regime_switch::signals(
+                &series.closes(),
+                *fast_sma,
+                *slow_sma,
+                *buy_regime,
+                *sell_regime,
+            ),
             Strategy::Custom { .. } => {
                 // Placeholder for custom strategies
                 vec![Signal::Hold; series.len()]
