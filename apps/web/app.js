@@ -1,5 +1,8 @@
+import {createComparison} from "./comparison.js";
+
 const form = document.querySelector("form");
 const el = id => document.getElementById(id);
+const comparison = createComparison(el("comparison"));
 const labels = {"report.html": "Download HTML report", "summary.json": "Download portfolio summary", "equity.json": "Download equity curves", "orders.csv": "Download order ledger", "manifest.json": "Download replay manifest"};
 let active = new URLSearchParams(location.search).get("run");
 let timer;
@@ -81,6 +84,7 @@ async function refresh() {
       link.textContent = labels[name] || name;
       el("artifacts").append(link);
     }
+    void comparison.show(run);
     const cancellable = ["queued","running"].includes(run.state);
     el("cancel-run").hidden = !cancellable;
     if (cancellable) timer = setTimeout(refresh, 1000);
@@ -139,6 +143,7 @@ form.onsubmit = async event => {
   try {
     const dataset = await request("/v1/datasets", {method:"POST", headers:{"Content-Type":"text/csv"}, body:file});
     const run = await request("/v1/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({dataset:dataset.id, options})});
+    comparison.reset();
     active = run.id;
     el("cancel-error").textContent = "";
     el("cancel-run").hidden = true;

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg import OperationalError
@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from shared import ARTIFACTS, build_id, connect, initialize
 
 MAX_BYTES = 8 * 1024 * 1024
+LOCAL_RUN_SCOPE = "local"
 
 
 class Options(BaseModel):
@@ -96,17 +97,38 @@ async def upload(request: Request):
 
 
 @app.post("/v1/runs", status_code=202)
-def submit(submission: Submission):
-    run_id = uuid4()
+def submit(submission: Submission, idempotency_key: Annotated[list[str] | None, Header()] = None):
+    key = None
+    if idempotency_key is not None:
+        if len(idempotency_key) != 1:
+            raise HTTPException(422, "Send exactly one Idempotency-Key header")
+        key = idempotency_key[0]
+        if not 1 <= len(key) <= 128 or any(not "!" <= char <= "~" or char == "," for char in key):
+            raise HTTPException(422, "Idempotency-Key must contain 1–128 visible ASCII characters without commas")
+
+    # Validated options include all defaults. JSONB equality ignores object key
+    # order and equivalent numeric representations.
+    options = Jsonb(submission.options.model_dump())
+    scope = LOCAL_RUN_SCOPE if key is not None else None
     with connect() as db:
         row = db.execute("""
-            INSERT INTO qbt_runs (id, dataset, options, build)
-            SELECT %s, id, %s, %s FROM qbt_datasets WHERE id = %s
+            INSERT INTO qbt_runs (id, dataset, options, build, idempotency_scope, idempotency_key)
+            SELECT %s, id, %s, %s, %s, %s FROM qbt_datasets WHERE id = %s
+            ON CONFLICT (idempotency_scope, idempotency_key) DO NOTHING
             RETURNING id, state
-        """, (run_id, Jsonb(submission.options.model_dump()), app.state.build, submission.dataset)).fetchone()
+        """, (uuid4(), options, app.state.build, scope, key, submission.dataset)).fetchone()
+        if row is None and key is not None:
+            # At READ COMMITTED this statement sees the winner after the insert
+            # waits for a simultaneous transaction to commit.
+            row = db.execute("""
+                SELECT id, state, dataset = %s AND options = %s AS matches
+                FROM qbt_runs WHERE idempotency_scope = %s AND idempotency_key = %s
+            """, (submission.dataset, options, scope, key)).fetchone()
+            if row is not None and not row["matches"]:
+                raise HTTPException(409, "Idempotency-Key already used for a different run request")
         if row is None:
             raise HTTPException(404, "Unknown dataset")
-    return row
+    return {"id": row["id"], "state": row["state"]}
 
 
 @app.get("/v1/runs")

@@ -29,6 +29,8 @@ curl -fsS "$base/v1/runs/$run/artifacts/manifest.json" -o manifest.json
 
 Interactive endpoint documentation is at `/docs`. Upload accepts raw CSV up to 8 MiB. Identical bytes share one dataset ID. Upload records the bytes, and the engine validates the bars during a run. A failed simulation exposes its error through the status endpoint.
 
+To retry a submission safely, send an optional `Idempotency-Key` header with `POST /v1/runs`. Use one case-sensitive key of 1 to 128 visible ASCII characters without commas, such as a UUID. The key applies across the local service. A retry with the same dataset ID and validated options, including defaults, returns HTTP 202 with the original run ID and its current state, even after completion. Reusing a key with a different dataset or options returns HTTP 409. Each request without the header creates a new run. Keys are retained with their runs.
+
 This first deployment stores inputs, job state and artifacts together in PostgreSQL. Workers claim jobs for their binary's SHA-256. Keep the binary immutable while either process runs and restart both when upgrading. An expired six-minute lease allows a worker of the same build to recover a job. The attempt token fences publication, and all artifacts become visible in one transaction. The API supports single and comparison runs. Project authentication, walk-forward submission and external object storage are planned.
 
 Use **Cancel run** in the workspace or `POST /v1/runs/{id}/cancel` to cancel a queued or running job. A successful cancellation immediately revokes the attempt and prevents artifact publication. The worker checks ownership at one-second intervals during execution. Repeating a cancellation succeeds. If completion won the race, the API returns HTTP 409 and preserves the result.
@@ -74,7 +76,7 @@ docker compose exec -T postgres psql -U qbt -d qbt \
   -c "SELECT state, count(*) FROM qbt_runs WHERE state IN ('queued', 'running') GROUP BY state;"
 ```
 
-Then stop the worker with `docker compose stop worker`, take a backup, and run the startup command from the new checkout under the same project name. Workers claim jobs for their exact CLI build, so incomplete jobs may need the previous image to finish. Both services initialize the existing schema transactionally under a PostgreSQL advisory lock. For a release with schema changes, rehearse its upgrade on a restored copy and follow that release's migration instructions. Changing the PostgreSQL major version requires a separate database upgrade or dump and restore.
+Then stop the worker with `docker compose stop worker`, take a backup, and run the startup command from the new checkout under the same project name. Workers claim jobs for their exact CLI build, so incomplete jobs may need the previous image to finish. On startup, both services initialize the schema and apply the release's schema upgrades transactionally under a PostgreSQL advisory lock, preserving existing runs. For a release with schema changes, rehearse its upgrade on a restored copy and follow that release's migration instructions. Changing the PostgreSQL major version requires a separate database upgrade or dump and restore.
 
 ## Machine-readable results
 
