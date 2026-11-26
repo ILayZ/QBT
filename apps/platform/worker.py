@@ -41,9 +41,30 @@ def simulate(run, work):
                 cmd.append(flag)
         elif value is not None:
             cmd.extend((flag, str(value)))
-    proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300)
-    if proc.returncode:
-        raise ValueError(proc.stderr.decode(errors="replace")[-2000:] or f"QBT exited {proc.returncode}")
+    deadline = time.monotonic() + 300
+    with subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as proc:
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(cmd, 300)
+                try:
+                    _, stderr = proc.communicate(timeout=min(remaining, 1))
+                    break
+                except subprocess.TimeoutExpired:
+                    with connect() as db:
+                        owned = db.execute("""
+                            SELECT 1 FROM qbt_runs WHERE id = %s AND attempt = %s AND state = 'running'
+                        """, (run["id"], run["attempt"])).fetchone()
+                    if owned is None:
+                        # Cancellation or lease takeover revoked publication rights.
+                        return
+            if proc.returncode:
+                raise ValueError(stderr.decode(errors="replace")[-2000:] or f"QBT exited {proc.returncode}")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
 
 
 def finish(run, work, error=None):

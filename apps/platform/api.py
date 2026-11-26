@@ -130,6 +130,22 @@ def status(run_id: UUID):
     return row
 
 
+@app.post("/v1/runs/{run_id}/cancel")
+def cancel(run_id: UUID):
+    with connect() as db:
+        row = db.execute("SELECT state FROM qbt_runs WHERE id = %s FOR UPDATE", (run_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Unknown run")
+        if row["state"] in ("queued", "running"):
+            db.execute("""
+                UPDATE qbt_runs SET state = 'cancelled', attempt = NULL, expires_at = NULL
+                WHERE id = %s
+            """, (run_id,))
+        elif row["state"] != "cancelled":
+            raise HTTPException(409, "Run already finished")
+    return {"id": run_id, "state": "cancelled"}
+
+
 @app.get("/v1/runs/{run_id}/artifacts/{name}")
 def download(run_id: UUID, name: str):
     if name not in ARTIFACTS:

@@ -131,6 +131,7 @@ jobs:
           trap 'kill "$api_pid" "$worker_pid" 2>/dev/null || true' EXIT
           python apps/platform/test_http.py
           python apps/platform/test_browser.py
+          python apps/platform/test_cancel.py
 
       - name: Save sample comparison report and order journal
         uses: actions/upload-artifact@v4

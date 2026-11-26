@@ -81,7 +81,9 @@ async function refresh() {
       link.textContent = labels[name] || name;
       el("artifacts").append(link);
     }
-    if (["queued","running"].includes(run.state)) timer = setTimeout(refresh, 1000);
+    const cancellable = ["queued","running"].includes(run.state);
+    el("cancel-run").hidden = !cancellable;
+    if (cancellable) timer = setTimeout(refresh, 1000);
   } catch (err) {
     if (current !== generation) return;
     el("diagnostic").textContent = err.message;
@@ -89,6 +91,19 @@ async function refresh() {
   }
 }
 
+el("cancel-run").onclick = async () => {
+  const id = active;
+  el("cancel-run").disabled = true;
+  el("cancel-error").textContent = "";
+  try {
+    await request("/v1/runs/" + encodeURIComponent(id) + "/cancel", {method:"POST"});
+  } catch (err) {
+    if (id === active) el("cancel-error").textContent = err.message;
+  } finally {
+    if (id === active) await refresh();
+    el("cancel-run").disabled = false;
+  }
+};
 el("retry").onclick = refresh;
 if (active) refresh();
 
@@ -125,6 +140,8 @@ form.onsubmit = async event => {
     const dataset = await request("/v1/datasets", {method:"POST", headers:{"Content-Type":"text/csv"}, body:file});
     const run = await request("/v1/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({dataset:dataset.id, options})});
     active = run.id;
+    el("cancel-error").textContent = "";
+    el("cancel-run").hidden = true;
     const url = new URL(location.href);
     url.searchParams.set("run", active);
     history.replaceState(null,"",url);
