@@ -1,6 +1,6 @@
 const form = document.querySelector("form");
 const el = id => document.getElementById(id);
-const labels = {"report.html": "Download HTML report", "orders.csv": "Download order ledger", "manifest.json": "Download replay manifest"};
+const labels = {"report.html": "Download HTML report", "summary.json": "Download portfolio summary", "equity.json": "Download equity curves", "orders.csv": "Download order ledger", "manifest.json": "Download replay manifest"};
 let active = new URLSearchParams(location.search).get("run");
 let timer;
 let generation = 0;

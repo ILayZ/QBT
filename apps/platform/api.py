@@ -124,9 +124,10 @@ def status(run_id: UUID):
         row = db.execute("""
             SELECT id, dataset, options, build, state, error FROM qbt_runs WHERE id = %s
         """, (run_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404, "Unknown run")
-    row["artifacts"] = {name: f"/v1/runs/{run_id}/artifacts/{name}" for name in ARTIFACTS} if row["state"] == "succeeded" else {}
+        if row is None:
+            raise HTTPException(404, "Unknown run")
+        links = db.execute("SELECT name FROM qbt_artifacts WHERE run_id = %s ORDER BY name", (run_id,)).fetchall() if row["state"] == "succeeded" else []
+    row["artifacts"] = {item["name"]: f"/v1/runs/{run_id}/artifacts/{item['name']}" for item in links}
     return row
 
 

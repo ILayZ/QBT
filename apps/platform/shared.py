@@ -9,6 +9,8 @@ BINARY = Path(os.environ.get("QBT_BINARY", "target/release/qbt")).resolve()
 ARTIFACTS = {
     "report.html": "text/html",
     "orders.csv": "text/csv",
+    "summary.json": "application/json",
+    "equity.json": "application/json",
     "manifest.json": "application/json",
 }
 

@@ -33,7 +33,8 @@ def simulate(run, work):
     source = work / "input.csv"
     source.write_bytes(content)
     cmd = [str(BINARY), "run", "--input", str(source), "--output", str(work / "report.html"),
-           "--ledger", str(work / "orders.csv"), "--save-manifest", str(work / "manifest.json")]
+           "--ledger", str(work / "orders.csv"), "--save-manifest", str(work / "manifest.json"),
+           "--summary", str(work / "summary.json"), "--equity", str(work / "equity.json")]
     for name, value in run["options"].items():
         flag = "--" + name.replace("_", "-")
         if isinstance(value, bool):
