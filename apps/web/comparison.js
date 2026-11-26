@@ -1,5 +1,6 @@
-const money = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
-const difference = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD", signDisplay: "exceptZero"});
+const amount = new Intl.NumberFormat("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const difference = new Intl.NumberFormat("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: "exceptZero"});
+const orderAmount = new Intl.NumberFormat("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 8});
 const percent = new Intl.NumberFormat("en-US", {style: "percent", maximumFractionDigits: 2});
 const axisMoney = new Intl.NumberFormat("en-US", {maximumFractionDigits: 2});
 const day = new Intl.DateTimeFormat("en-US", {month: "short", day: "numeric", year: "numeric", timeZone: "UTC"});
@@ -7,10 +8,10 @@ const clock = new Intl.DateTimeFormat("en-GB", {hour: "2-digit", minute: "2-digi
 const pageSize = 25;
 const columns = [
   ["name", "Portfolio", name => name],
-  ["final_equity", "Final equity", value => money.format(value)],
+  ["final_equity", "Final equity", value => amount.format(value)],
   ["difference_vs_dca", "vs DCA", value => difference.format(value)],
   ["max_drawdown", "Max drawdown", value => percent.format(value)],
-  ["unspent_reserve", "Unspent reserve", value => money.format(value)],
+  ["unspent_reserve", "Unspent reserve", value => amount.format(value)],
   ["max_reserve_wait_hours", "Max reserve wait", value => value + " h"],
 ];
 const orderFields = [
@@ -102,7 +103,7 @@ function drawSummary(table, portfolios) {
   render();
 }
 
-function drawEquity(chart, legend, data) {
+function drawEquity(chart, legend, data, units) {
   const timestamps = data.timestamps.map(Date.parse);
   const start = timestamps[0], end = timestamps.at(-1);
   if (!timestamps.length || timestamps.some(time => !Number.isFinite(time)) || !data.portfolios.length) {
@@ -142,9 +143,9 @@ function drawEquity(chart, legend, data) {
     chart.setAttribute("viewBox", "0 0 " + width + " " + height);
     const title = svgNode("title", {id: "equity-chart-title"}, "Equity over time");
     const desc = svgNode("desc", {id: "equity-chart-description"},
-      "Portfolio equity in USD from " + new Date(start).toISOString() + " through " + new Date(end).toISOString() +
-      ". Vertical axis ranges from " + money.format(low) + " to " + money.format(high) + ".");
-    chart.replaceChildren(title, desc, axisLabel(left, 14, "Equity (USD)"));
+      "Portfolio equity in " + units + " from " + new Date(start).toISOString() + " through " + new Date(end).toISOString() +
+      ". Vertical axis ranges from " + amount.format(low) + " to " + amount.format(high) + ".");
+    chart.replaceChildren(title, desc, axisLabel(left, 14, "Equity (" + units + ")"));
     for (let i = 0; i <= 4; i++) {
       const value = low + (high - low) * i / 4, row = y(value);
       chart.append(svgNode("line", {x1: left, x2: right, y1: row, y2: row, class: "chart-grid"}),
@@ -212,11 +213,14 @@ function readOrders(csv) {
 
 function drawOrders(root, strategies, portfolios) {
   const dropdown = root.querySelector("#order-strategy");
+  const status = root.querySelector("#order-status");
   const previous = root.querySelector("#order-previous"), next = root.querySelector("#order-next");
   const range = root.querySelector("#order-range");
   const body = root.querySelector("#order-table tbody");
   const heading = root.querySelector("#order-table thead tr");
   let page = 0;
+  let filtered = [];
+  const statusIndex = orderFields.findIndex(([key]) => key === "status");
   dropdown.replaceChildren();
   for (const name of new Set([...portfolios.map(row => row.name), ...strategies.keys()])) {
     dropdown.add(new Option(name, name));
@@ -230,7 +234,7 @@ function drawOrders(root, strategies, portfolios) {
   }
 
   function render() {
-    const rows = strategies.get(dropdown.value) || [];
+    const rows = filtered;
     const first = page * pageSize, last = Math.min(first + pageSize, rows.length);
     body.replaceChildren();
     for (const row of rows.slice(first, last)) {
@@ -240,19 +244,28 @@ function drawOrders(root, strategies, portfolios) {
         let display = value;
         if (key.endsWith("_time")) display = value.replace("T", " ").replace(/(?:\+00:00|Z)$/, "");
         if (key === "status") display = Object.hasOwn(orderStatuses, value) ? orderStatuses[value] : value;
-        if (key === "price" || key === "fee" || key === "cash") display = money.format(Number(value));
+        if (key === "price" || key === "fee" || key === "cash") display = orderAmount.format(Number(value));
         tr.append(node("td", display));
       }
       body.append(tr);
     }
-    range.textContent = rows.length ? `Orders ${first + 1}–${last} of ${rows.length}` : "No orders for this portfolio.";
+    range.textContent = rows.length ? `Orders ${first + 1}–${last} of ${rows.length}` : "No orders match the selected filters.";
     previous.disabled = page === 0;
     next.disabled = last >= rows.length;
   }
-  dropdown.onchange = () => { page = 0; render(); };
+  function filter() {
+    const rows = strategies.get(dropdown.value) || [];
+    filtered = status.value ? rows.filter(row => row[statusIndex] === status.value) : rows;
+    page = 0;
+    render();
+  }
+  status.replaceChildren(new Option("All statuses", ""));
+  for (const [value, label] of Object.entries(orderStatuses)) status.add(new Option(label, value));
+  dropdown.onchange = filter;
+  status.onchange = filter;
   previous.onclick = () => { page--; render(); };
   next.onclick = () => { page++; render(); };
-  render();
+  filter();
 }
 
 export function createComparison(root) {
@@ -270,7 +283,8 @@ export function createComparison(root) {
   }
   async function show(run) {
     reset();
-    if (run.state !== "succeeded" || run.options.strategy !== "all") return;
+    if (run.state !== "succeeded") return;
+    root.querySelector("#comparison-title").textContent = run.options.strategy === "all" ? "Strategy comparison" : "Portfolio performance";
     root.hidden = false;
     const {["summary.json"]: summary, ["equity.json"]: equity, ["orders.csv"]: orders} = run.artifacts;
     if (!summary || !equity || !orders) {
@@ -286,10 +300,12 @@ export function createComparison(root) {
         artifact(summary, signal, "json"), artifact(equity, signal, "json"), artifact(orders, signal, "text"),
       ]);
       if (signal.aborted) return;
-      const {portfolios} = requireV1(metrics);
+      const {portfolios, quote_currency: quote} = requireV1(metrics);
+      const units = typeof quote === "string" && quote.trim() ? quote.trim() : "quote units";
+      root.querySelector("#comparison-units").textContent = "Monetary values in " + units + ".";
       const orderRows = readOrders(csv);
       drawSummary(root.querySelector("#portfolio-table"), portfolios);
-      stopChart = drawEquity(root.querySelector("#equity-chart"), root.querySelector("#equity-legend"), requireV1(series));
+      stopChart = drawEquity(root.querySelector("#equity-chart"), root.querySelector("#equity-legend"), requireV1(series), units);
       drawOrders(root, orderRows, portfolios);
       message.textContent = "";
       content.hidden = false;
