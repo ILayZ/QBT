@@ -143,6 +143,7 @@ with sync_playwright() as playwright:
     def legacy_run(route):
         response = route.fetch()
         data = response.json()
+        data["resolved_spec"] = None
         for name in ("summary.json", "equity.json"):
             data["artifacts"].pop(name)
         route.fulfill(response=response, json=data)
@@ -152,6 +153,8 @@ with sync_playwright() as playwright:
     page.goto(successful_url)
     expect(comparison).to_contain_text("Comparison preview is unavailable")
     expect(ledger).to_be_visible()
+    expect(page.get_by_role("button", name="Repeat exactly")).to_be_hidden()
+    expect(page.get_by_role("button", name="Edit a copy")).to_be_visible()
     page.unroute(status_url, legacy_run)
 
     dataset = page.get_by_label("Saved dataset")
@@ -169,4 +172,54 @@ with sync_playwright() as playwright:
     expect(single_row.get_by_role("rowheader")).to_have_text("DipDCA")
     expect(single_row.get_by_role("cell").nth(1)).to_have_text("—")
     expect(single.get_by_role("img", name="Equity over time")).to_be_visible()
+    page.goto(successful_url)
+    repeat = page.get_by_role("button", name="Repeat exactly")
+    edit = page.get_by_role("button", name="Edit a copy")
+    expect(repeat).to_be_enabled()
+    original = page.request.get(status_url).json()
+    assert original["resolved_spec"] is not None
+    repeat_url = status_url + "/repeat"
+    def reject_repeat(route):
+        route.fulfill(status=409, json={"detail": "The original build is unavailable."})
+
+    page.route(repeat_url, reject_repeat)
+    repeat.click()
+    expect(page.locator("#run-action-error")).to_have_text("The original build is unavailable.")
+    expect(repeat).to_be_enabled()
+    assert page.url == successful_url
+    page.unroute(repeat_url, reject_repeat)
+    with page.expect_response(lambda response: response.url == repeat_url and response.status == 202) as received:
+        repeat.click()
+    repeated_id = received.value.json()["id"]
+    assert repeated_id != original["id"]
+    expect(page).to_have_url("http://127.0.0.1:8765/?run=" + repeated_id)
+    expect(page.get_by_role("status")).to_have_text("succeeded", timeout=90000)
+    repeated = page.request.get("http://127.0.0.1:8765/v1/runs/" + repeated_id).json()
+    assert repeated["dataset"] == original["dataset"]
+    assert repeated["resolved_spec"] == original["resolved_spec"]
+
+    page.goto(successful_url)
+    dataset = page.get_by_label("Saved dataset")
+    capital = page.get_by_label("Initial capital")
+    capital.fill("555")
+    page.get_by_label("Strategy", exact=True).select_option("DCA")
+    edit.click()
+    expect(dataset).to_have_value(original["dataset"])
+    expect(capital).to_have_value("1800")
+    expect(page.get_by_label("Strategy", exact=True)).to_have_value("all")
+    expect(page.get_by_label("Minimum order")).to_have_value("1")
+    expect(page.locator("#copy-note")).to_contain_text(original["id"][:8])
+    assert page.url == successful_url
+    capital.fill("1950")
+    with page.expect_response(lambda response: response.url == "http://127.0.0.1:8765/v1/runs"
+                              and response.request.method == "POST" and response.status == 202) as received:
+        page.get_by_role("button", name="Start backtest").click()
+    copied_id = received.value.json()["id"]
+    assert copied_id not in (original["id"], repeated_id)
+    expect(page).to_have_url("http://127.0.0.1:8765/?run=" + copied_id)
+    expect(page.get_by_role("status")).to_have_text("succeeded", timeout=90000)
+    copied = page.request.get("http://127.0.0.1:8765/v1/runs/" + copied_id).json()
+    assert copied["dataset"] == original["dataset"]
+    assert copied["options"]["capital"] == 1950
+    assert page.request.get(status_url).json()["options"] == original["options"]
     browser.close()
