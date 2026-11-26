@@ -16,20 +16,25 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
 
 pub fn summary(path: &Path, results: &[BacktestResult]) -> Result<()> {
     let dca = results.iter().find(|r| r.strategy_name == "DCA");
-    let portfolios: Vec<_> = results.iter().map(|r| json!({
-        "name": r.strategy_name,
-        "initial_capital": r.initial_capital,
-        "final_equity": r.final_value,
-        "difference_vs_dca": dca.map(|baseline| r.final_value - baseline.final_value),
-        "total_return": r.total_return,
-        "max_drawdown": r.max_drawdown,
-        "completed_trades": r.num_trades,
-        "skipped_buys": r.skipped_buys,
-        "below_minimum_buys": r.below_minimum_buys,
-        "mean_asset_weight": r.mean_asset_weight,
-        "unspent_reserve": r.dip_reserve,
-        "max_reserve_wait_hours": r.dip_reserve.map(|_| r.max_reserve_wait_hours),
-    })).collect();
+    let portfolios: Vec<_> = results
+        .iter()
+        .map(|r| {
+            json!({
+                "name": r.strategy_name,
+                "initial_capital": r.initial_capital,
+                "final_equity": r.final_value,
+                "difference_vs_dca": dca.map(|baseline| r.final_value - baseline.final_value),
+                "total_return": r.total_return,
+                "max_drawdown": r.max_drawdown,
+                "completed_trades": r.num_trades,
+                "skipped_buys": r.skipped_buys,
+                "below_minimum_buys": r.below_minimum_buys,
+                "mean_asset_weight": r.mean_asset_weight,
+                "unspent_reserve": r.dip_reserve,
+                "max_reserve_wait_hours": r.dip_reserve.map(|_| r.max_reserve_wait_hours),
+            })
+        })
+        .collect();
     write_json(path, &json!({"version": 1, "portfolios": portfolios}))
 }
 

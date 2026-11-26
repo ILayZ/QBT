@@ -100,10 +100,7 @@ pub fn distinct_paths(paths: &[Option<&Path>]) -> Result<()> {
     for path in paths.iter().flatten() {
         let path = resolved(path)?;
         for prior in &seen {
-            ensure!(
-                prior != &path,
-                "Choose separate input and output paths"
-            );
+            ensure!(prior != &path, "Choose separate input and output paths");
             if prior.exists() && path.exists() {
                 ensure!(
                     !same_file::is_same_file(prior, &path)?,
