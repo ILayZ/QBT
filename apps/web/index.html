@@ -44,6 +44,33 @@
 <nav id="artifacts" aria-label="Result downloads"></nav>
 </section>
 </div>
+<section class="comparison" id="comparison" aria-labelledby="comparison-title" hidden>
+<h2 id="comparison-title">Strategy comparison</h2>
+<p id="comparison-message" aria-live="polite"></p>
+<div id="comparison-content" hidden>
+<h3 id="portfolio-title">Portfolio results</h3>
+<p id="comparison-units"></p>
+<div class="comparison-scroll" role="region" aria-labelledby="portfolio-title" tabindex="0">
+<table id="portfolio-table" aria-labelledby="portfolio-title"><thead><tr></tr></thead><tbody></tbody></table>
+</div>
+<h3>Equity curves</h3>
+<svg id="equity-chart" role="img" aria-labelledby="equity-chart-title" aria-describedby="equity-chart-description"></svg>
+<ul id="equity-legend" aria-label="Portfolio legend"></ul>
+<h3 id="order-title">Order ledger</h3>
+<div class="order-filters">
+<label>Ledger portfolio <select id="order-strategy"></select></label>
+<label>Order status <select id="order-status"></select></label>
+</div>
+<p id="order-range" aria-live="polite"></p>
+<div class="comparison-scroll" role="region" aria-labelledby="order-title" tabindex="0">
+<table id="order-table" aria-labelledby="order-title"><thead><tr></tr></thead><tbody></tbody></table>
+</div>
+<div class="order-pagination">
+<button type="button" id="order-previous">Previous orders</button>
+<button type="button" id="order-next">Next orders</button>
+</div>
+</div>
+</section>
 <section class="history" aria-labelledby="history-title">
 <div class="history-header"><h2 id="history-title">Run history</h2><button type="button" id="history-refresh">Refresh history</button></div>
 <p id="history-message">Loading runs…</p>
