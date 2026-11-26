@@ -2,6 +2,10 @@ use anyhow::Result;
 use argh::FromArgs;
 use qbt_engine::report::json::DatasetMetadata;
 use qbt_engine::run::{BUILTINS, RunSpec, builtin_strategy};
+use qbt_engine::strategy::catalog::{
+    COMPARISON_ID, DEFAULT_DCA_AMOUNT, DEFAULT_DCA_INTERVAL, DEFAULT_DIP_LOOKBACK,
+    DEFAULT_DIP_PERCENT, DEFAULT_STRATEGY, STRATEGIES, strategy_catalog,
+};
 use std::path::{Path, PathBuf};
 
 use crate::manifest::{RunManifest, distinct_paths};
@@ -51,21 +55,21 @@ pub struct RunArgs {
     #[argh(option)]
     pub save_manifest: Option<PathBuf>,
     /// trailing hourly closes used by DipDCA
-    #[argh(option, default = "168")]
+    #[argh(option, default = "DEFAULT_DIP_LOOKBACK")]
     pub dip_lookback: usize,
     /// percent below trailing high required by DipDCA
-    #[argh(option, default = "5.0")]
+    #[argh(option, default = "DEFAULT_DIP_PERCENT")]
     pub dip_percent: f64,
     /// strategy name
-    #[argh(option, default = r#""DCA".to_string()"#)]
+    #[argh(option, default = "DEFAULT_STRATEGY.to_string()")]
     pub strategy: String,
     /// DCA interval in hours
-    #[argh(option, default = r#"24"#)]
+    #[argh(option, default = "DEFAULT_DCA_INTERVAL")]
     pub dca_interval: u32,
     /// DCA amount
-    #[argh(option, default = r#"100.0"#)]
+    #[argh(option, default = "DEFAULT_DCA_AMOUNT")]
     pub dca_amount: f64,
-    /// entry notional for DCA, MomentumSMA and RegimeSwitch; VolAdjustedDCA uses 1/24 per hour
+    /// order amount, or daily reserve allocation for DipDCA; VolAdjustedDCA uses 1/24 per hour
     #[argh(option)]
     pub order_amount: Option<f64>,
     /// maximum buy notional per strategy per UTC execution day
@@ -158,10 +162,10 @@ pub struct WalkForwardArgs {
     #[argh(option)]
     pub input: PathBuf,
     /// trailing hourly closes used by DipDCA
-    #[argh(option, default = "168")]
+    #[argh(option, default = "DEFAULT_DIP_LOOKBACK")]
     pub dip_lookback: usize,
     /// percent below trailing high required by DipDCA
-    #[argh(option, default = "5.0")]
+    #[argh(option, default = "DEFAULT_DIP_PERCENT")]
     pub dip_percent: f64,
     /// strategy name
     #[argh(option, default = r#""MomentumSMA".to_string()"#)]
@@ -202,6 +206,9 @@ pub struct StrategiesArgs {
     /// show detailed strategy parameters
     #[argh(switch)]
     pub verbose: bool,
+    /// print the machine-readable strategy catalog
+    #[argh(switch)]
+    pub json: bool,
 }
 
 impl RunArgs {
@@ -229,7 +236,8 @@ impl RunArgs {
         };
         let series = PriceSeries::from_path(&self.input, series_symbol(&dataset_metadata))?;
 
-        let names = if self.strategy.eq_ignore_ascii_case("all") {
+        let include_benchmarks = self.strategy.eq_ignore_ascii_case(COMPARISON_ID);
+        let names = if include_benchmarks {
             BUILTINS.to_vec()
         } else {
             vec![self.strategy.as_str()]
@@ -270,7 +278,7 @@ impl RunArgs {
             strategies,
             config,
             budget,
-            include_benchmarks: self.strategy.eq_ignore_ascii_case("all"),
+            include_benchmarks,
         };
         distinct_paths(&[
             Some(&self.input),
@@ -418,9 +426,9 @@ impl WalkForwardArgs {
 
         let strategy = builtin_strategy(
             &self.strategy,
-            24,
-            100.0,
-            100.0,
+            DEFAULT_DCA_INTERVAL,
+            DEFAULT_DCA_AMOUNT,
+            DEFAULT_DCA_AMOUNT,
             self.dip_lookback,
             self.dip_percent,
         )?;
@@ -465,42 +473,24 @@ impl ReportArgs {
 
 impl StrategiesArgs {
     pub fn execute(&self) -> Result<()> {
-        let strategies = vec![
-            ("DCA", "Dollar-cost averaging at fixed intervals"),
-            ("DipDCA", "Accumulate daily cash and buy on a drawdown"),
-            ("MomentumSMA", "Buy when price > SMA, sell when price < SMA"),
-            (
-                "VolAdjustedDCA",
-                "Increase DCA amount when volatility is high",
-            ),
-            (
-                "RegimeSwitch",
-                "Switch positions based on market regime detection",
-            ),
-            (
-                "Custom",
-                "User-defined strategy (requires custom implementation)",
-            ),
-        ];
-
-        for (name, desc) in strategies {
-            println!("• {} - {}", name, desc);
+        if self.json {
+            println!("{}", serde_json::to_string_pretty(&strategy_catalog())?);
+            return Ok(());
+        }
+        for strategy in &STRATEGIES {
+            println!("• {} - {}", strategy.id, strategy.description);
             if self.verbose {
-                match name {
-                    "DipDCA" => {
-                        println!("    Parameters: daily allocation, dip-lookback, dip-percent")
-                    }
-                    "DCA" => println!("    Parameters: interval_hours, amount"),
-                    "MomentumSMA" => {
-                        println!("    Parameters: lookback, buy_threshold, sell_threshold")
-                    }
-                    "VolAdjustedDCA" => {
-                        println!("    Parameters: base_amount, vol_lookback, vol_multiplier_max")
-                    }
-                    "RegimeSwitch" => {
-                        println!("    Parameters: fast_sma, slow_sma, buy_regime, sell_regime")
-                    }
-                    _ => {}
+                if !strategy.aliases.is_empty() {
+                    println!("    Aliases: {}", strategy.aliases.join(", "));
+                }
+                let flags = strategy
+                    .parameter_ids
+                    .iter()
+                    .map(|id| format!("--{}", id.replace('_', "-")))
+                    .collect::<Vec<_>>();
+                println!("    Parameters: {}", flags.join(", "));
+                for (id, value) in strategy.fixed_settings() {
+                    println!("    {id} = {value} (fixed)");
                 }
             }
         }

@@ -141,6 +141,12 @@ qbt replay --manifest experiment.json --input data/sample_btc_1h.csv \\
 
 Choose a new manifest filename for each saved run. The manifest stores resolved simulation parameters and XXH3-128 fingerprints of the parsed UTC bars and CLI executable. Preserve the binary and the dataset with the manifest. Replay checks both fingerprints before opening its outputs. CSV files may be relocated or reformatted if they parse to identical bars. This format covers `run`, including comparisons.
 
+### Strategy catalog
+
+Run `qbt strategies` to list the runnable strategies. Add `--verbose` to see
+their CLI parameters, aliases and fixed settings, or use `qbt strategies --json`
+for the versioned catalog with parameter types, defaults and ranges.
+
 ### DipDCA
 
 ```bash

@@ -154,19 +154,61 @@ request("/v1/datasets").then(({datasets}) => {
   el("dataset-note").textContent = "Could not load saved datasets. " + err.message;
 });
 
+function addStrategyParameter(parameter) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.name = parameter.id;
+  input.step = parameter.type === "integer" ? "1" : "any";
+  input.required = parameter.default !== null;
+  if (parameter.default === null) input.placeholder = "Strategy default";
+  else input.value = parameter.default;
+  if (parameter.minimum !== undefined) input.min = parameter.minimum;
+  if (parameter.maximum !== undefined) input.max = parameter.maximum;
+  input.addEventListener("input", () => {
+    const value = input.valueAsNumber;
+    const minimum = parameter.exclusive_minimum;
+    const maximum = parameter.exclusive_maximum;
+    input.setCustomValidity(
+      value <= minimum ? "Enter a value greater than " + minimum + "." :
+      value >= maximum ? "Enter a value less than " + maximum + "." : ""
+    );
+  });
+  const label = document.createElement("label");
+  label.title = parameter.description;
+  label.append(parameter.label, input);
+  const field = document.createElement("div");
+  field.append(label);
+  el(parameter.advanced ? "strategy-settings" : "strategy-primary").append(field);
+  return {field, input};
+}
+
 async function setup() {
   const schema = await request("/v1/run-options");
+  const catalog = schema.strategy_catalog;
   const strategy = form.elements.strategy;
   strategy.replaceChildren();
-  for (const name of schema.properties.strategy.enum) {
-    strategy.add(new Option(name === "all" ? "Compare all strategies" : name, name));
+  for (const {id} of catalog.strategies) {
+    strategy.add(new Option(id, id));
   }
+  strategy.add(new Option("Compare all strategies", catalog.comparison_id));
+  strategy.value = catalog.default_strategy;
   for (const [name, field] of Object.entries(schema.properties)) {
     const input = form.elements.namedItem(name);
     if (!input || field.default == null) continue;
     if (input.type === "checkbox") input.checked = field.default;
     else input.value = field.default;
   }
+  const parameters = catalog.parameters.map(addStrategyParameter);
+  function showStrategyFields() {
+    const selected = catalog.strategies.find(item => item.id === strategy.value);
+    for (const {field, input} of parameters) {
+      const applies = strategy.value === catalog.comparison_id || selected?.parameter_ids.includes(input.name);
+      field.hidden = !applies;
+      input.disabled = !applies;
+    }
+  }
+  strategy.addEventListener("change", showStrategyFields);
+  showStrategyFields();
   el("start").disabled = false;
 }
 
@@ -180,7 +222,7 @@ form.onsubmit = async event => {
   }
   const options = {strategy: form.elements.strategy.value, limit_includes_fees: form.elements.limit_includes_fees.checked};
   for (const input of form.querySelectorAll('input[type="number"]')) {
-    if (input.value !== "") options[input.name] = input.valueAsNumber;
+    if (!input.disabled && input.value !== "") options[input.name] = input.valueAsNumber;
   }
   el("start").disabled = true;
   try {
