@@ -43,6 +43,7 @@ def initialize():
                 expires_at timestamptz,
                 error text
             );
+            CREATE INDEX IF NOT EXISTS qbt_runs_history ON qbt_runs (created_at DESC, id DESC);
             CREATE TABLE IF NOT EXISTS qbt_artifacts (
                 run_id uuid NOT NULL REFERENCES qbt_runs(id),
                 name text NOT NULL,

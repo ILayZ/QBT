@@ -19,6 +19,7 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="Start backtest").click()
     expect(page.get_by_role("status")).to_have_text("succeeded", timeout=90000)
     assert "?run=" in page.url
+    successful_url = page.url
     page.reload()
     ledger = page.get_by_role("link", name="Download order ledger")
     expect(ledger).to_be_visible()
@@ -34,4 +35,15 @@ with sync_playwright() as playwright:
     expect(page.get_by_role("status")).to_have_text("failed", timeout=90000)
     expect(page.locator("#diagnostic")).not_to_be_empty()
     expect(ledger).to_have_count(0)
+    page.goto("http://127.0.0.1:8765")
+    history = page.get_by_role("region", name="Run history")
+    older = history.locator(f'a[href="?{successful_url.split("?", 1)[1]}"]')
+    older.click()
+    expect(ledger).to_be_visible()
+    assert page.url == successful_url
+
+    newest = page.request.get("http://127.0.0.1:8765/v1/runs?limit=1").json()
+    second = page.request.get(f"http://127.0.0.1:8765/v1/runs?limit=1&before={newest['next']}").json()
+    assert newest["runs"][0]["state"] == "failed"
+    assert second["runs"][0]["id"] == successful_url.split("run=")[1]
     browser.close()

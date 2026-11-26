@@ -41,6 +41,12 @@
 <button id="retry" hidden>Refresh status</button>
 <nav id="artifacts" aria-label="Result downloads"></nav>
 </section>
-</div></main>
+</div>
+<section class="history" aria-labelledby="history-title">
+<div class="history-header"><h2 id="history-title">Run history</h2><button type="button" id="history-refresh">Refresh history</button></div>
+<p id="history-message">Loading runs…</p>
+<ol id="past-runs"></ol>
+<button type="button" id="older" hidden>Load older runs</button>
+</section></main>
 <script type="module" src="/ui/app.js"></script>
 </html>

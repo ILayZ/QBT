@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
@@ -96,6 +96,26 @@ def submit(submission: Submission):
         if row is None:
             raise HTTPException(404, "Unknown dataset")
     return row
+
+
+@app.get("/v1/runs")
+def list_runs(limit: Annotated[int, Query(ge=1, le=100)] = 20, before: UUID | None = None):
+    with connect() as db:
+        params = []
+        where = ""
+        if before is not None:
+            anchor = db.execute("SELECT created_at FROM qbt_runs WHERE id = %s", (before,)).fetchone()
+            if anchor is None:
+                raise HTTPException(404, "Unknown history cursor")
+            where = "WHERE (created_at, id) < (%s, %s)"
+            params.extend((anchor["created_at"], before))
+        rows = db.execute(f"""
+            SELECT id, created_at, state, options->>'strategy' AS strategy,
+                   options->'capital' AS capital, options->'daily_limit' AS daily_limit
+            FROM qbt_runs {where}
+            ORDER BY created_at DESC, id DESC LIMIT %s
+        """, (*params, limit + 1)).fetchall()
+    return {"runs": rows[:limit], "next": rows[limit - 1]["id"] if len(rows) > limit else None}
 
 
 @app.get("/v1/runs/{run_id}")
