@@ -58,9 +58,15 @@ impl RunManifest {
 
     pub fn verify(&self, series: &PriceSeries) -> Result<()> {
         ensure!(self.version == 1, "Unsupported manifest version");
-        ensure!(self.spec.version == RunSpec::VERSION, "Unsupported run spec");
+        ensure!(
+            self.spec.version == RunSpec::VERSION,
+            "Unsupported run spec"
+        );
         ensure!(self.bars_xxh3_128 == bars_hash(series), "Dataset mismatch");
-        ensure!(self.executable_xxh3_128 == executable_hash()?, "QBT build mismatch");
+        ensure!(
+            self.executable_xxh3_128 == executable_hash()?,
+            "QBT build mismatch"
+        );
         Ok(())
     }
 
@@ -76,19 +82,41 @@ fn resolved(path: &Path) -> Result<PathBuf> {
     if path.try_exists()? {
         return Ok(path.canonicalize()?);
     }
-    ensure!(fs::symlink_metadata(path).is_err(), "Dangling output symlink");
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    Ok(parent.canonicalize()?.join(path.file_name().context("Expected a file path")?))
+    ensure!(
+        fs::symlink_metadata(path).is_err(),
+        "Dangling output symlink"
+    );
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    Ok(parent
+        .canonicalize()?
+        .join(path.file_name().context("Expected a file path")?))
 }
 
-pub fn distinct_paths(input: &Path, output: &Path, ledger: Option<&Path>, manifest: Option<&Path>) -> Result<()> {
+pub fn distinct_paths(
+    input: &Path,
+    output: &Path,
+    ledger: Option<&Path>,
+    manifest: Option<&Path>,
+) -> Result<()> {
     let mut seen: Vec<PathBuf> = Vec::new();
-    for path in [Some(input), Some(output), ledger, manifest].into_iter().flatten() {
+    for path in [Some(input), Some(output), ledger, manifest]
+        .into_iter()
+        .flatten()
+    {
         let path = resolved(path)?;
         for prior in &seen {
-            ensure!(prior != &path, "Choose separate input, report, ledger and manifest paths");
+            ensure!(
+                prior != &path,
+                "Choose separate input, report, ledger and manifest paths"
+            );
             if prior.exists() && path.exists() {
-                ensure!(!same_file::is_same_file(prior, &path)?, "Paths refer to the same file");
+                ensure!(
+                    !same_file::is_same_file(prior, &path)?,
+                    "Paths refer to the same file"
+                );
             }
         }
         seen.push(path);

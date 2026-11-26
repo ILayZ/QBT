@@ -221,11 +221,21 @@ impl RunArgs {
             budget,
             include_benchmarks: self.strategy.eq_ignore_ascii_case("all"),
         };
-        distinct_paths(&self.input, &self.output, self.ledger.as_deref(), self.save_manifest.as_deref())?;
+        distinct_paths(
+            &self.input,
+            &self.output,
+            self.ledger.as_deref(),
+            self.save_manifest.as_deref(),
+        )?;
         if let Some(path) = &self.save_manifest {
             anyhow::ensure!(!path.try_exists()?, "Choose a new manifest path");
             let manifest = RunManifest::new(&series, spec)?;
-            render(&manifest.spec, &series, &self.output, self.ledger.as_deref())?;
+            render(
+                &manifest.spec,
+                &series,
+                &self.output,
+                self.ledger.as_deref(),
+            )?;
             manifest.save(path)?;
         } else {
             render(&spec, &series, &self.output, self.ledger.as_deref())?;
@@ -238,11 +248,21 @@ impl ReplayArgs {
     pub fn execute(&self) -> Result<()> {
         use qbt_engine::data::PriceSeries;
 
-        distinct_paths(&self.input, &self.output, self.ledger.as_deref(), Some(&self.manifest))?;
+        distinct_paths(
+            &self.input,
+            &self.output,
+            self.ledger.as_deref(),
+            Some(&self.manifest),
+        )?;
         let series = PriceSeries::from_csv(&self.input, "DATA".to_string())?;
         let manifest = RunManifest::load(&self.manifest)?;
         manifest.verify(&series)?;
-        render(&manifest.spec, &series, &self.output, self.ledger.as_deref())
+        render(
+            &manifest.spec,
+            &series,
+            &self.output,
+            self.ledger.as_deref(),
+        )
     }
 }
 
