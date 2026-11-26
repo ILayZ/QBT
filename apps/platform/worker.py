@@ -8,6 +8,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Timer
 from uuid import uuid4
 
 from psycopg import OperationalError
@@ -16,6 +17,7 @@ from shared import ARTIFACTS, BINARY, build_id, connect, initialize
 
 MAX_ATTEMPTS = 3
 IDLE_SECONDS = 0.5
+RENEW_TIMEOUT_SECONDS = 5
 LOGGER = logging.getLogger(__name__)
 
 
@@ -80,8 +82,11 @@ def lock_attempt(db, run):
     """, (run["id"], run["attempt"])).fetchone() is not None
 
 
-def renew(run, lease):
+def renew(run, lease, *, timeout=RENEW_TIMEOUT_SECONDS):
     with connect(connect_timeout=5) as db:
+        # Bound the ownership check even if another transaction holds the row.
+        db.execute("SELECT set_config('statement_timeout', %s, true)",
+                   (f"{max(1, math.ceil(timeout * 1000))}ms",))
         if not lock_attempt(db, run):
             return False
         return db.execute("""
@@ -105,7 +110,8 @@ def simulate(run, work, settings):
                 cmd.append(flag)
         elif value is not None:
             cmd.extend((flag, str(value)))
-    if not renew(run, settings.lease):
+    renew_timeout = min(settings.heartbeat, RENEW_TIMEOUT_SECONDS)
+    if not renew(run, settings.lease, timeout=renew_timeout):
         return False
 
     launch = cmd
@@ -115,6 +121,10 @@ def simulate(run, work, settings):
 
     deadline = time.monotonic() + settings.timeout
     with subprocess.Popen(launch, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as proc:
+        # A blocked database connection must not extend the subprocess timeout.
+        alarm = Timer(max(0, deadline - time.monotonic()), proc.kill)
+        alarm.daemon = True
+        alarm.start()
         try:
             while True:
                 remaining = deadline - time.monotonic()
@@ -126,12 +136,16 @@ def simulate(run, work, settings):
                 except subprocess.TimeoutExpired:
                     if time.monotonic() >= deadline:
                         raise subprocess.TimeoutExpired(cmd, settings.timeout) from None
-                    if not renew(run, settings.lease):
+                    if not renew(run, settings.lease, timeout=renew_timeout):
                         return False
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(cmd, settings.timeout)
             if proc.returncode:
                 raise ValueError(stderr.decode(errors="replace")[-2000:] or f"QBT exited {proc.returncode}")
             return True
         finally:
+            alarm.cancel()
+            alarm.join()
             if proc.poll() is None:
                 proc.kill()
                 proc.communicate()
