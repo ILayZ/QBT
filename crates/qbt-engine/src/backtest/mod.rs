@@ -106,7 +106,7 @@ pub struct Backtester {
     pub config: BacktestConfig,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BuyBudget {
     pub daily_limit: Option<f64>,
     pub min_notional: Option<f64>,
