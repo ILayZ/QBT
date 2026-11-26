@@ -138,8 +138,8 @@ fn builtin_strategy(
     vol_base: f64,
     dip_lookback: usize,
     dip_percent: f64,
-) -> Result<crate::strategy::Strategy> {
-    use crate::strategy::{Regime, Strategy};
+) -> Result<qbt_engine::strategy::Strategy> {
+    use qbt_engine::strategy::{Regime, Strategy};
     Ok(match name.to_ascii_uppercase().as_str() {
         "DIPDCA" => Strategy::DipDCA {
             daily_allocation: amount,
@@ -172,10 +172,10 @@ fn builtin_strategy(
 
 impl RunArgs {
     pub fn execute(&self) -> Result<()> {
-        use crate::backtest::BuyBudget;
-        use crate::backtest::{BacktestConfig, Backtester};
-        use crate::data::PriceSeries;
-        use crate::report::HtmlReport;
+        use qbt_engine::backtest::BuyBudget;
+        use qbt_engine::backtest::{BacktestConfig, Backtester};
+        use qbt_engine::data::PriceSeries;
+        use qbt_engine::report::HtmlReport;
         use std::io::{BufWriter, Write};
 
         // CF-017: Validate positive intervals and parameters at CLI boundary
@@ -279,7 +279,7 @@ impl RunArgs {
             w.flush()?;
         }
         if self.strategy.eq_ignore_ascii_case("all") {
-            use crate::strategy::Strategy;
+            use qbt_engine::strategy::Strategy;
             let benchmark_budget = BuyBudget {
                 min_notional: self.min_notional,
                 ..BuyBudget::default()
@@ -314,9 +314,9 @@ impl RunArgs {
 
 impl WalkForwardArgs {
     pub fn execute(&self) -> Result<()> {
-        use crate::backtest::{BacktestConfig, Backtester, WalkForwardConfig};
-        use crate::data::PriceSeries;
-        use crate::report::HtmlReport;
+        use qbt_engine::backtest::{BacktestConfig, Backtester, WalkForwardConfig};
+        use qbt_engine::data::PriceSeries;
+        use qbt_engine::report::HtmlReport;
 
         // CF-017: Validate positive intervals and window sizes at CLI boundary
         if self.train == 0 {
@@ -365,8 +365,8 @@ impl WalkForwardArgs {
 
 impl ReportArgs {
     pub fn execute(&self) -> Result<()> {
-        use crate::backtest::BacktestResult;
-        use crate::report::HtmlReport;
+        use qbt_engine::backtest::BacktestResult;
+        use qbt_engine::report::HtmlReport;
 
         let json = std::fs::read_to_string(&self.input)?;
         let results: Vec<BacktestResult> = serde_json::from_str(&json)?;

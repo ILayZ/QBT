@@ -94,6 +94,7 @@ if "$BIN" run --input "$DATA" --strategy all --capital 1800 --order-amount 10 \
     --daily-limit 10 --min-notional 1 --output "$OUT_DIR/min.html" --ledger "$OUT_DIR/min.csv" &&
     python3 - "$OUT_DIR/min.html" "$OUT_DIR/min.csv" <<'PYTHON'
 import csv
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -101,11 +102,20 @@ from pathlib import Path
 html = Path(sys.argv[1]).read_text()
 with open(sys.argv[2]) as stream:
     orders = list(csv.DictReader(stream))
+# Baseline from the pre-workspace master build b4d9065, using the same sample and flags.
+expected_final = {
+    "DCA": "$1875.49", "DipDCA": "$1862.67", "VolAdjustedDCA": "$1800.00",
+    "MomentumSMA": "$1796.51", "RegimeSwitch": "$1799.83",
+    "Cash": "$1800.00", "Buy and hold": "$1810.05",
+}
+ledger_hash = hashlib.sha256(Path(sys.argv[2]).read_bytes()).hexdigest()
+assert ledger_hash == "1bd3dfa9c2c6b13b37c720125f8382c1b069527dc9df601162a58f770b9cc666", ledger_hash
 assert "<svg" in html
 for name in ("DCA", "DipDCA", "VolAdjustedDCA", "MomentumSMA", "RegimeSwitch", "Cash", "Buy and hold"):
     match = re.search(r"<tr><td>" + name + r"</td>(.*?)</tr>", html)
     values = re.findall(r"<td>([^<]*)</td>", match[1])
     print(name, *values)
+    assert values[0] == expected_final[name], (name, values[0])
     buys = [r for r in orders if r["strategy"] == name and r["side"] == "buy"]
     if buys:
         assert int(values[-2]) == sum(r["status"] != "filled" for r in buys)

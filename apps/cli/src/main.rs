@@ -1,5 +1,7 @@
+mod cli;
+
 use anyhow::Result;
-use qbt::cli::Cli;
+use cli::{Cli, Command};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -10,9 +12,9 @@ fn main() -> Result<()> {
     let cli: Cli = argh::from_env();
 
     match &cli.command {
-        qbt::cli::Command::Run(args) => args.execute(),
-        qbt::cli::Command::WalkForward(args) => args.execute(),
-        qbt::cli::Command::Report(args) => args.execute(),
-        qbt::cli::Command::Strategies(args) => args.execute(),
+        Command::Run(args) => args.execute(),
+        Command::WalkForward(args) => args.execute(),
+        Command::Report(args) => args.execute(),
+        Command::Strategies(args) => args.execute(),
     }
 }

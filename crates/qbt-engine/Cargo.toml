@@ -1,0 +1,36 @@
+[package]
+name = "qbt-engine"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Data handling
+polars = { version = "0.42", features = ["csv", "parquet", "serde", "json", "ipc", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-decimal", "lazy", "temporal", "timezones", "strings"] }
+# polars-core 0.42 calls hashbrown::HashMap::raw_table_mut() (in categorical builder)
+# but never enables hashbrown's `raw` feature itself. Force-enable it so the
+# categorical module compiles (feature unification). No direct use; transitive only.
+hashbrown = { version = "0.14", features = ["raw"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json.workspace = true
+# Pinned to =0.4.43: chrono 0.4.44+ added `Datelike::quarter()`, which collides with
+# arrow-arith 51's own `ChronoDateExt::quarter()` extension trait -> E0034 ambiguity.
+chrono = { version = "=0.4.38", features = ["serde"] }
+thiserror = "1.0"
+anyhow.workspace = true
+# Parallel processing
+rayon = "1.10"
+# Plotting for HTML reports
+plotters = { version = "0.3", features = ["svg_backend"] }
+# Math/statistics
+statrs = "0.16"
+# Configuration
+config = "0.14"
+# Logging
+tracing = "0.1"
+# Progress bars
+indicatif = "0.17"
+# Random for simulations
+rand = "0.8"
+rand_distr = "0.4"
+# Parquet support (via polars already includes parquet)
+arrow = { version = "51", features = ["csv"] }
