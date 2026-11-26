@@ -15,6 +15,47 @@ async function request(url, options) {
   return response.json();
 }
 
+let nextCursor = null;
+let historyRequest = 0;
+
+async function loadHistory(append = false) {
+  const token = ++historyRequest;
+  const cursor = append ? nextCursor : null;
+  const list = el("past-runs");
+  el("older").disabled = true;
+  try {
+    const page = await request("/v1/runs" + (cursor ? "?before=" + encodeURIComponent(cursor) : ""));
+    if (token !== historyRequest) return;
+    if (!append) list.replaceChildren();
+    for (const run of page.runs) {
+      const row = document.createElement("li");
+      row.dataset.id = run.id;
+      const link = document.createElement("a");
+      link.href = "?run=" + encodeURIComponent(run.id);
+      link.textContent = (run.strategy === "all" ? "All strategies" : run.strategy) + " · " + run.id.slice(0, 8);
+      const details = document.createElement("span");
+      const daily = run.daily_limit == null ? "" : " · daily limit " + run.daily_limit;
+      details.textContent = new Date(run.created_at).toLocaleString() + " · capital " + run.capital + daily;
+      const state = document.createElement("span");
+      state.className = "run-state";
+      state.textContent = run.state;
+      row.append(link, details, state);
+      list.append(row);
+    }
+    nextCursor = page.next;
+    el("older").hidden = !nextCursor;
+    el("history-message").textContent = list.children.length ? "" : "No runs yet.";
+  } catch (err) {
+    if (token === historyRequest) el("history-message").textContent = "Could not load history. " + err.message;
+  } finally {
+    if (token === historyRequest) el("older").disabled = false;
+  }
+}
+
+el("history-refresh").onclick = () => loadHistory();
+el("older").onclick = () => loadHistory(true);
+loadHistory();
+
 async function refresh() {
   const current = ++generation;
   clearTimeout(timer);
@@ -23,6 +64,8 @@ async function refresh() {
     const run = await request("/v1/runs/" + encodeURIComponent(active));
     if (current !== generation) return;
     el("state").textContent = run.state;
+    const rowState = el("past-runs").querySelector(`[data-id="${run.id}"] .run-state`);
+    if (rowState) rowState.textContent = run.state;
     el("metadata").replaceChildren();
     for (const [label, value] of [["Run ID",run.id], ["Strategy",run.options.strategy], ["Initial capital",run.options.capital]]) {
       const key = document.createElement("dt"), item = document.createElement("dd");
@@ -85,6 +128,7 @@ form.onsubmit = async event => {
     const url = new URL(location.href);
     url.searchParams.set("run", active);
     history.replaceState(null,"",url);
+    loadHistory();
     el("metadata").replaceChildren();
     el("artifacts").replaceChildren();
     el("diagnostic").textContent = "";
