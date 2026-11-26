@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strategy testing · QBT</title>
+<link rel="stylesheet" href="/ui/styles.css">
+<header><strong>QBT</strong><span>Strategy testing</span><a href="/docs">API docs ↗</a></header>
+<main>
+<h1>Backtest workspace</h1>
+<div class="layout">
+<form id="run-form">
+<h2>New run</h2>
+<label>Market data <input type="file" id="file" accept=".csv,text/csv" required aria-describedby="file-note"></label>
+<small id="file-note">Hourly OHLCV · CSV up to 8 MiB</small>
+<label>Strategy <select name="strategy" required><option value="">Loading…</option></select></label>
+<div class="fields">
+<label>Initial capital <input name="capital" type="number" step="any" min="0" required></label>
+<label>Order amount <input name="order_amount" type="number" step="any" min="0" placeholder="Strategy default"></label>
+<label>Daily buy limit <input name="daily_limit" type="number" step="any" min="0" placeholder="Unlimited"></label>
+<label>Minimum order <input name="min_notional" type="number" step="any" min="0" placeholder="No minimum"></label>
+</div>
+<details><summary>Execution and strategy settings</summary>
+<div class="fields">
+<label>Fee (fraction) <input name="fee" type="number" step="any" min="0" required></label>
+<label>Slippage (fraction) <input name="slippage" type="number" step="any" min="0" required></label>
+<label>Annual risk-free rate <input name="risk_free" type="number" step="any" required></label>
+<label>DCA interval (hours) <input name="dca_interval" type="number" min="1" required></label>
+<label>DCA amount <input name="dca_amount" type="number" step="any" min="0" required></label>
+<label>DipDCA lookback (hours) <input name="dip_lookback" type="number" min="2" required></label>
+<label>DipDCA drop (%) <input name="dip_percent" type="number" step="any" min="0" max="100" required></label>
+</div><label class="check"><input name="limit_includes_fees" type="checkbox"> Include fees in daily limit</label></details>
+<button id="start" disabled>Start backtest</button>
+<p role="alert" id="error"></p>
+</form>
+<section aria-labelledby="result-title">
+<h2 id="result-title">Run results</h2>
+<p id="state" role="status">Waiting for a run</p>
+<dl id="metadata"></dl>
+<p id="diagnostic"></p>
+<button id="retry" hidden>Refresh status</button>
+<nav id="artifacts" aria-label="Result downloads"></nav>
+</section>
+</div></main>
+<script type="module" src="/ui/app.js"></script>
+</html>
