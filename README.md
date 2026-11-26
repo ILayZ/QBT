@@ -39,6 +39,8 @@ cargo build --release
 # binary at: target/release/qbt
 ```
 
+The [local HTTP service](apps/platform/README.md) accepts CSV datasets, queues runs and serves reports, order ledgers and replay manifests.
+
 ## Repository layout
 
 The root Cargo workspace builds `qbt-engine` (`crates/qbt-engine`) and `qbt-cli` (`apps/cli`). Run `cargo test --workspace --locked` to test both packages, or `cargo run -p qbt-cli -- strategies` to launch the CLI during development.

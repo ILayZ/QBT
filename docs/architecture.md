@@ -1,6 +1,6 @@
 # QBT platform architecture
 
-Status: proposed. The repository currently ships the Rust engine, local CLI and HTML renderer. The platform described below is a design for the next releases.
+Status: the Rust engine, CLI and first local HTTP API and worker are implemented. The single-user service uses PostgreSQL for its queue and small artifacts, and invokes the pinned CLI executable. Project isolation, object storage and the remaining platform capabilities below describe the target design. See [local service](../apps/platform/README.md).
 
 ## Deployment and ownership
 
