@@ -55,7 +55,7 @@ with sync_playwright() as playwright:
     page.get_by_label("Initial capital").fill("1800")
     page.get_by_label("Order amount").fill("10")
     page.get_by_label("Daily buy limit").fill("10")
-    page.get_by_label("Minimum order").fill("1")
+    page.get_by_role("spinbutton", name="Minimum order", exact=True).fill("1")
     page.get_by_role("button", name="Start backtest").click()
     expect(page.get_by_role("status")).to_have_text("succeeded", timeout=90000)
     assert "?run=" in page.url
@@ -207,7 +207,7 @@ with sync_playwright() as playwright:
     expect(dataset).to_have_value(original["dataset"])
     expect(capital).to_have_value("1800")
     expect(page.get_by_label("Strategy", exact=True)).to_have_value("all")
-    expect(page.get_by_label("Minimum order")).to_have_value("1")
+    expect(page.get_by_role("spinbutton", name="Minimum order", exact=True)).to_have_value("1")
     expect(page.locator("#copy-note")).to_contain_text(original["id"][:8])
     assert page.url == successful_url
     capital.fill("1950")
