@@ -222,4 +222,21 @@ with sync_playwright() as playwright:
     assert copied["dataset"] == original["dataset"]
     assert copied["options"]["capital"] == 1950
     assert page.request.get(status_url).json()["options"] == original["options"]
+    page.get_by_label("Evaluation", exact=True).select_option("windows")
+    page.get_by_label("Strategy", exact=True).select_option("MomentumSMA")
+    page.get_by_label("Test length").fill("2")
+    page.get_by_role("button", name="Start backtest").click()
+    windows_view = page.get_by_role("region", name="Walk-forward results")
+    expect(windows_view).to_be_visible(timeout=90000)
+    expect(windows_view.locator("tbody tr")).to_have_count(4)
+    expect(windows_view).to_contain_text("Arithmetic mean")
+    window_url = page.url
+    page.reload()
+    expect(windows_view).to_be_visible()
+    page.get_by_role("button", name="Repeat exactly").click()
+    expect(page).not_to_have_url(window_url)
+    expect(windows_view.locator("tbody tr")).to_have_count(4)
+    page.get_by_role("button", name="Edit a copy").click()
+    expect(page.get_by_label("Evaluation", exact=True)).to_have_value("windows")
+    expect(page.get_by_label("Test length")).to_have_value("2")
     browser.close()
