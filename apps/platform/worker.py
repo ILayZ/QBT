@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from psycopg import OperationalError
 
-from shared import ARTIFACTS, BINARY, build_id, connect, initialize
+from shared import ARTIFACTS, BINARY, build_id, connect, initialize, option_flags
 
 MAX_ATTEMPTS = 3
 IDLE_SECONDS = 0.5
@@ -69,7 +69,7 @@ def claim(build, lease):
             UPDATE qbt_runs r SET state = 'running', attempts = attempts + 1, attempt = %s,
                 expires_at = clock_timestamp() + %s * interval '1 second'
             FROM candidate WHERE r.id = candidate.id
-            RETURNING r.id, r.dataset, r.options, r.attempt
+            RETURNING r.id, r.dataset, r.options, r.attempt, r.resolved_spec
         """, (build, MAX_ATTEMPTS, uuid4(), lease)).fetchone()
 
 
@@ -102,17 +102,16 @@ def simulate(run, work, settings):
         """, (run["dataset"],)).fetchone()
     source = work / f"input.{dataset['format']}"
     source.write_bytes(dataset["csv"])
-    cmd = [str(BINARY), "run", "--input", str(source), "--output", str(work / "report.html"),
-           "--ledger", str(work / "orders.csv"), "--save-manifest", str(work / "manifest.json"),
-           "--summary", str(work / "summary.json"), "--equity", str(work / "equity.json")]
-    options = {**run["options"], "symbol": dataset["symbol"], "quote_currency": dataset["quote_currency"]}
-    for name, value in options.items():
-        flag = "--" + name.replace("_", "-")
-        if isinstance(value, bool):
-            if value:
-                cmd.append(flag)
-        elif value is not None:
-            cmd.extend((flag, str(value)))
+    manifest = work / "manifest.json"
+    if run["resolved_spec"] is None:
+        options = {**run["options"], "symbol": dataset["symbol"], "quote_currency": dataset["quote_currency"]}
+        cmd = [str(BINARY), "run", "--save-manifest", str(manifest), *option_flags(options)]
+    else:
+        manifest.write_text(run["resolved_spec"]["manifest"])
+        cmd = [str(BINARY), "replay", "--manifest", str(manifest)]
+    cmd.extend(["--input", str(source), "--output", str(work / "report.html"),
+                "--ledger", str(work / "orders.csv"), "--summary", str(work / "summary.json"),
+                "--equity", str(work / "equity.json")])
     renew_timeout = min(settings.heartbeat, RENEW_TIMEOUT_SECONDS)
     if not renew(run, settings.lease, timeout=renew_timeout):
         return False

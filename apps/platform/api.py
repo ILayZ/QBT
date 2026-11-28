@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 from starlette.concurrency import run_in_threadpool
 
-from shared import ARTIFACTS, BINARY, build_id, connect, initialize
+from shared import ARTIFACTS, BINARY, build_id, connect, initialize, option_flags
 
 MAX_BYTES = 8 * 1024 * 1024
 LOCAL_RUN_SCOPE = "local"
@@ -215,6 +215,25 @@ def get_dataset(dataset_id: DatasetID):
     return dataset_metadata(row)
 
 
+def freeze_run(dataset, options):
+    if dataset["validation"] is None:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / ("input." + dataset["format"])
+        source.write_bytes(dataset.pop("csv"))
+        manifest = Path(tmp) / "manifest.json"
+        flags = option_flags({**options, "symbol": dataset["symbol"], "quote_currency": dataset["quote_currency"]})
+        try:
+            result = subprocess.run([str(BINARY), "run", "--input", str(source), "--manifest-only",
+                                     "--save-manifest", str(manifest), *flags], capture_output=True, timeout=30)
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(503, "Run resolution timed out") from exc
+        if result.returncode:
+            raise HTTPException(422, result.stderr.decode(errors="replace")[:2000])
+        return Jsonb({"version": 1, "build": app.state.build, "dataset": dataset_metadata(dataset),
+                          "manifest": manifest.read_text()})
+
+
 @app.post("/v1/runs", status_code=202)
 def submit(submission: Submission, idempotency_key: Annotated[list[str] | None, Header()] = None):
     key = None
@@ -225,29 +244,51 @@ def submit(submission: Submission, idempotency_key: Annotated[list[str] | None, 
         if not 1 <= len(key) <= 128 or any(not "!" <= char <= "~" or char == "," for char in key):
             raise HTTPException(422, "Idempotency-Key must contain 1–128 visible ASCII characters without commas")
 
-    # Validated options include all defaults. JSONB equality ignores object key
-    # order and equivalent numeric representations.
-    options = Jsonb(submission.options.model_dump())
+    options = submission.options.model_dump()
+    explicit = Jsonb(submission.options.model_dump(exclude_unset=True))
     scope = LOCAL_RUN_SCOPE if key is not None else None
     with connect() as db:
-        row = db.execute("""
-            INSERT INTO qbt_runs (id, dataset, options, build, idempotency_scope, idempotency_key)
-            SELECT %s, id, %s, %s, %s, %s FROM qbt_datasets WHERE id = %s
-            ON CONFLICT (idempotency_scope, idempotency_key) DO NOTHING
-            RETURNING id, state
-        """, (uuid4(), options, app.state.build, scope, key, submission.dataset)).fetchone()
-        if row is None and key is not None:
-            # At READ COMMITTED this statement sees the winner after the insert
-            # waits for a simultaneous transaction to commit.
-            row = db.execute("""
-                SELECT id, state, dataset = %s AND options = %s AS matches
+        if key is not None:
+            # Serialize submissions for this key before resolving defaults or reading input bytes.
+            db.execute("SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))", (scope, key))
+            existing = db.execute("""
+                SELECT id, state, dataset = %s AND (request_options = %s OR options = %s) AS matches
                 FROM qbt_runs WHERE idempotency_scope = %s AND idempotency_key = %s
-            """, (submission.dataset, options, scope, key)).fetchone()
-            if row is not None and not row["matches"]:
-                raise HTTPException(409, "Idempotency-Key already used for a different run request")
-        if row is None:
+            """, (submission.dataset, explicit, Jsonb(options), scope, key)).fetchone()
+            if existing:
+                if not existing["matches"]:
+                    raise HTTPException(409, "Idempotency-Key already used for a different run request")
+                return {"id": existing["id"], "state": existing["state"]}
+
+        dataset = db.execute(f"SELECT {DATASET_FIELDS}, csv FROM qbt_datasets WHERE id = %s",
+                             (submission.dataset,)).fetchone()
+        if dataset is None:
             raise HTTPException(404, "Unknown dataset")
+        snapshot = freeze_run(dataset, options)
+        row = db.execute("""
+            INSERT INTO qbt_runs (id, dataset, options, build, idempotency_scope, idempotency_key,
+                                  resolved_spec, request_options)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id, state
+        """, (uuid4(), submission.dataset, Jsonb(options), app.state.build, scope, key, snapshot, explicit)).fetchone()
     return {"id": row["id"], "state": row["state"]}
+
+
+@app.post("/v1/runs/{run_id}/repeat", status_code=202)
+def repeat(run_id: UUID):
+    with connect() as db:
+        source = db.execute("SELECT build, resolved_spec IS NOT NULL AS frozen FROM qbt_runs WHERE id = %s",
+                            (run_id,)).fetchone()
+        if source is None:
+            raise HTTPException(404, "Unknown run")
+        if not source["frozen"]:
+            raise HTTPException(409, "This run has no saved specification")
+        if source["build"] != app.state.build:
+            raise HTTPException(409, "The original build is unavailable.")
+        return db.execute("""
+            INSERT INTO qbt_runs (id, dataset, options, build, resolved_spec)
+            SELECT %s, dataset, options, build, resolved_spec FROM qbt_runs WHERE id = %s
+            RETURNING id, state
+        """, (uuid4(), run_id)).fetchone()
 
 
 @app.get("/v1/runs")
@@ -274,12 +315,16 @@ def list_runs(limit: Annotated[int, Query(ge=1, le=100)] = 20, before: UUID | No
 def status(run_id: UUID):
     with connect() as db:
         row = db.execute("""
-            SELECT r.id, r.dataset, r.options, r.build, r.state, r.error, d.symbol, d.quote_currency
+            SELECT r.id, r.dataset, r.options, r.build, r.state, r.error, r.resolved_spec,
+                   CASE WHEN r.resolved_spec IS NULL THEN d.symbol ELSE r.resolved_spec #>> '{dataset,symbol}' END AS symbol,
+                   CASE WHEN r.resolved_spec IS NULL THEN d.quote_currency ELSE r.resolved_spec #>> '{dataset,quote_currency}' END AS quote_currency
             FROM qbt_runs r JOIN qbt_datasets d ON d.id = r.dataset WHERE r.id = %s
         """, (run_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "Unknown run")
         links = db.execute("SELECT name FROM qbt_artifacts WHERE run_id = %s ORDER BY name", (run_id,)).fetchall() if row["state"] == "succeeded" else []
+    if row["resolved_spec"] is not None:
+        row["resolved_spec"]["manifest"] = json.loads(row["resolved_spec"]["manifest"])
     row["artifacts"] = {item["name"]: f"/v1/runs/{run_id}/artifacts/{item['name']}" for item in links}
     return row
 
