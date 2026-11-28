@@ -52,6 +52,8 @@ def initialize():
                 error text
             );
             ALTER TABLE qbt_runs
+                ADD COLUMN IF NOT EXISTS resolved_spec jsonb,
+                ADD COLUMN IF NOT EXISTS request_options jsonb,
                 ADD COLUMN IF NOT EXISTS idempotency_scope text,
                 ADD COLUMN IF NOT EXISTS idempotency_key text;
             CREATE UNIQUE INDEX IF NOT EXISTS qbt_runs_idempotency
@@ -64,3 +66,15 @@ def initialize():
                 PRIMARY KEY (run_id, name)
             )
         """)
+
+
+def option_flags(options):
+    flags = []
+    for name, value in options.items():
+        flag = "--" + name.replace("_", "-")
+        if isinstance(value, bool):
+            if value:
+                flags.append(flag)
+        elif value is not None:
+            flags.extend((flag, str(value)))
+    return flags

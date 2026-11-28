@@ -7,6 +7,10 @@ const labels = {"report.html": "Download HTML report", "summary.json": "Download
 let active = new URLSearchParams(location.search).get("run");
 let timer;
 let generation = 0;
+let selectedRun;
+let optionsReady = false;
+let working = false;
+const formDefaults = new Map();
 
 async function request(url, options) {
   const response = await fetch(url, options);
@@ -66,6 +70,8 @@ async function refresh() {
   try {
     const run = await request("/v1/runs/" + encodeURIComponent(active));
     if (current !== generation) return;
+    selectedRun = run;
+    updateRunActions();
     el("state").textContent = run.state;
     const rowState = el("past-runs").querySelector(`[data-id="${run.id}"] .run-state`);
     if (rowState) rowState.textContent = run.state;
@@ -97,6 +103,92 @@ async function refresh() {
     el("retry").hidden = false;
   }
 }
+
+function updateRunActions() {
+  el("edit-copy").hidden = !selectedRun;
+  el("repeat-run").hidden = selectedRun?.resolved_spec == null;
+  el("edit-copy").disabled = !optionsReady || working;
+  el("repeat-run").disabled = working;
+  el("start").disabled = !optionsReady || working;
+}
+
+function setWorking(value) {
+  working = value;
+  updateRunActions();
+}
+
+function openRun(run) {
+  comparison.reset();
+  active = run.id;
+  selectedRun = null;
+  updateRunActions();
+  el("run-action-error").textContent = "";
+  el("cancel-error").textContent = "";
+  el("cancel-run").hidden = true;
+  const url = new URL(location.href);
+  url.searchParams.set("run", active);
+  history.replaceState(null, "", url);
+  loadHistory();
+  el("metadata").replaceChildren();
+  el("artifacts").replaceChildren();
+  el("diagnostic").textContent = "";
+  el("state").textContent = run.state;
+  return refresh();
+}
+
+el("repeat-run").onclick = async () => {
+  const source = selectedRun;
+  if (working || source?.resolved_spec == null) return;
+  setWorking(true);
+  el("run-action-error").textContent = "";
+  try {
+    const run = await request("/v1/runs/" + encodeURIComponent(source.id) + "/repeat", {method:"POST"});
+    if (source.id === active) await openRun(run);
+  } catch (err) {
+    if (source.id === active) el("run-action-error").textContent = err.message;
+  } finally {
+    setWorking(false);
+  }
+};
+
+el("edit-copy").onclick = async () => {
+  const source = selectedRun;
+  if (working || !optionsReady || !source) return;
+  setWorking(true);
+  el("run-action-error").textContent = "";
+  try {
+    const strategy = form.elements.strategy;
+    if (![...strategy.options].some(option => option.value === source.options.strategy)) {
+      throw new Error("This strategy is unavailable in the current catalog.");
+    }
+    if (!catalog.has(source.dataset)) {
+      const dataset = await request("/v1/datasets/" + encodeURIComponent(source.dataset));
+      if (source.id !== active) return;
+      rememberDataset(dataset);
+    }
+    strategy.value = source.options.strategy;
+    strategy.dispatchEvent(new Event("change"));
+    for (const [name, savedDefault] of formDefaults) {
+      const input = form.elements.namedItem(name);
+      const value = Object.hasOwn(source.options, name) ? source.options[name] : savedDefault;
+      if (input.type === "checkbox") input.checked = value;
+      else input.value = value ?? "";
+      input.dispatchEvent(new Event("input"));
+    }
+    datasetSelect.value = source.dataset;
+    el("file").value = "";
+    el("symbol").value = "";
+    el("quote-currency").value = "";
+    showCoverage();
+    el("error").textContent = "";
+    el("copy-note").textContent = "Editing a copy of run " + source.id.slice(0, 8) + ".";
+    strategy.focus();
+  } catch (err) {
+    if (source.id === active) el("run-action-error").textContent = err.message;
+  } finally {
+    setWorking(false);
+  }
+};
 
 el("cancel-run").onclick = async () => {
   const id = active;
@@ -209,11 +301,16 @@ async function setup() {
   }
   strategy.addEventListener("change", showStrategyFields);
   showStrategyFields();
-  el("start").disabled = false;
+  for (const input of form.querySelectorAll('input[name][type="number"], input[name][type="checkbox"]')) {
+    formDefaults.set(input.name, input.type === "checkbox" ? input.checked : input.value);
+  }
+  optionsReady = true;
+  updateRunActions();
 }
 
 form.onsubmit = async event => {
   event.preventDefault();
+  if (working || !optionsReady) return;
   const file = el("file").files[0];
   el("error").textContent = "";
   if (!datasetSelect.value && (!file || file.size === 0 || file.size > 8 * 1024 * 1024)) {
@@ -224,7 +321,7 @@ form.onsubmit = async event => {
   for (const input of form.querySelectorAll('input[type="number"]')) {
     if (!input.disabled && input.value !== "") options[input.name] = input.valueAsNumber;
   }
-  el("start").disabled = true;
+  setWorking(true);
   try {
     let datasetId = datasetSelect.value;
     if (!datasetId) {
@@ -244,23 +341,12 @@ form.onsubmit = async event => {
       el("quote-currency").value = "";
     }
     const run = await request("/v1/runs", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({dataset:datasetId, options})});
-    comparison.reset();
-    active = run.id;
-    el("cancel-error").textContent = "";
-    el("cancel-run").hidden = true;
-    const url = new URL(location.href);
-    url.searchParams.set("run", active);
-    history.replaceState(null,"",url);
-    loadHistory();
-    el("metadata").replaceChildren();
-    el("artifacts").replaceChildren();
-    el("diagnostic").textContent = "";
-    el("state").textContent = run.state;
-    await refresh();
+    el("copy-note").textContent = "";
+    await openRun(run);
   } catch (err) {
     el("error").textContent = err.message;
   } finally {
-    el("start").disabled = false;
+    setWorking(false);
   }
 };
 setup().catch(err => { el("error").textContent = "Could not load run options. Reload to retry. " + err.message; });

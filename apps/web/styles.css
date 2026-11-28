@@ -36,3 +36,6 @@ a{color:var(--accent)}nav a{display:block;border-top:1px solid var(--line);paddi
 #order-range { margin: .65rem 0; font-variant-numeric: tabular-nums; }
 .order-pagination { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .65rem; }
 .order-pagination button:disabled { cursor: default; }
+.run-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+#run-action-error { color: #953426; overflow-wrap: anywhere; }
+#copy-note { overflow-wrap: anywhere; }

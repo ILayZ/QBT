@@ -54,6 +54,9 @@ pub struct RunArgs {
     /// save a reproducible JSON run manifest
     #[argh(option)]
     pub save_manifest: Option<PathBuf>,
+    /// write the resolved manifest without running the simulation (requires --save-manifest)
+    #[argh(switch)]
+    pub manifest_only: bool,
     /// trailing hourly closes used by DipDCA
     #[argh(option, default = "DEFAULT_DIP_LOOKBACK")]
     pub dip_lookback: usize,
@@ -288,9 +291,16 @@ impl RunArgs {
             self.summary.as_deref(),
             self.equity.as_deref(),
         ])?;
+        anyhow::ensure!(
+            !self.manifest_only || self.save_manifest.is_some(),
+            "--manifest-only requires --save-manifest"
+        );
         if let Some(path) = &self.save_manifest {
             anyhow::ensure!(!path.try_exists()?, "Choose a new manifest path");
             let manifest = RunManifest::new(&series, spec, dataset_metadata)?;
+            if self.manifest_only {
+                return manifest.save(path);
+            }
             render(
                 &manifest.spec,
                 &series,

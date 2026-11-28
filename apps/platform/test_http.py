@@ -98,6 +98,39 @@ def verify_idempotency():
     assert submit(payload, None)["id"] != submit(payload, None)["id"]
 
 
+def verify_frozen_defaults(dataset):
+    from api import BUILD, Options, Submission, app, submit
+    from pydantic import create_model
+
+    app.state.build = BUILD
+    key = uuid4().hex
+    original = submit(Submission(dataset=dataset), [key])
+    changed = create_model("ChangedDefaults", __base__=Options, capital=(float, 5000.0))
+    new_submission = Submission(dataset=dataset, options=changed())
+    assert submit(new_submission, [key])["id"] == original["id"]
+    new_run = submit(new_submission, None)
+    original_url = f"/v1/runs/{original['id']}"
+    repeated = json.loads(request(original_url + "/repeat", b"", expected_status=202))
+    results = []
+    for job in (original, repeated, new_run):
+        for _ in range(120):
+            status = json.loads(request(f"/v1/runs/{job['id']}"))
+            if status["state"] in ("succeeded", "failed"):
+                break
+            time.sleep(0.5)
+        assert status["state"] == "succeeded", status
+        results.append(status)
+    first, replay, fresh = results
+    assert first["resolved_spec"] == replay["resolved_spec"]
+    assert first["options"]["capital"] == 10000 and fresh["options"]["capital"] == 5000
+    assert first["resolved_spec"]["manifest"]["spec"] != fresh["resolved_spec"]["manifest"]["spec"]
+    for name, url in first["artifacts"].items():
+        assert request(url) == request(replay["artifacts"][name]), name
+    with connect() as db:
+        db.execute("UPDATE qbt_runs SET build = 'unavailable' WHERE id = %s", (new_run["id"],))
+    request(f"/v1/runs/{new_run['id']}/repeat", b"", expected_status=409)
+
+
 def upload(content, content_type="text/csv", *, query="", expected=201):
     return json.loads(request("/v1/datasets" + query, content, content_type, expected_status=expected))
 
@@ -267,4 +300,6 @@ if __name__ == "__main__":
     else:
         raise AssertionError("Published a failed run")
 
+    request(f"/v1/runs/{failed['id']}/repeat", b"", expected_status=409)
     verify_idempotency()
+    verify_frozen_defaults(sample["id"])
